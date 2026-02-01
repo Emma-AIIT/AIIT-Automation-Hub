@@ -29,7 +29,7 @@ export default function DebtRecoveryPage() {
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatsCard
             title="Total Outstanding"
             value={formatCurrency(stats.totalOutstanding)}
@@ -74,24 +74,13 @@ export default function DebtRecoveryPage() {
               </svg>
             }
           />
-          <StatsCard
-            title="Collection Rate"
-            value={`${stats.collectionRate.toFixed(1)}%`}
-            subtitle="This month"
-            trend={{ value: '+5.2%', positive: true }}
-            icon={
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-              </svg>
-            }
-          />
         </div>
       )}
 
       {/* Loading state for stats */}
       {statsLoading && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          {Array.from({ length: 5 }).map((_, i) => (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="h-32 rounded-2xl bg-[var(--color-bg-elevated)] animate-pulse" />
           ))}
         </div>

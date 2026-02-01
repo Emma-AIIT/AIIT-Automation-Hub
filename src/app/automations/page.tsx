@@ -3,13 +3,12 @@
 import Link from 'next/link';
 import { api } from '@/trpc/react';
 import { SIDEBAR_MODULES } from '@/lib/mock-data/quotes';
-import { MOCK_QUOTES } from '@/lib/mock-data/quotes';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 
 export default function AutomationsDashboardPage() {
   const { data: debtStats, isLoading: debtStatsLoading } = api.clients.getStats.useQuery();
-  const quotePipelineValue = MOCK_QUOTES.reduce((sum, q) => sum + q.value, 0);
-  const quoteCount = MOCK_QUOTES.length;
+  const { data: quoteData } = api.quotePipeline.getRows.useQuery();
+  const quoteCount = quoteData?.quotes?.length ?? 0;
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(amount);
 
@@ -41,8 +40,8 @@ export default function AutomationsDashboardPage() {
           <line x1="16" y1="17" x2="8" y2="17" />
         </svg>
       ),
-      stat: formatCurrency(quotePipelineValue),
-      statLabel: `${quoteCount} quotes`,
+      stat: quoteCount,
+      statLabel: 'quotes',
       active: true,
     },
     {
@@ -73,7 +72,7 @@ export default function AutomationsDashboardPage() {
       </div>
 
       {/* Quick stats - same styling as debt recovery */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <StatsCard
           title="Debt outstanding"
           value={debtStats ? formatCurrency(debtStats.totalOutstanding) : debtStatsLoading ? '…' : '—'}
@@ -81,17 +80,6 @@ export default function AutomationsDashboardPage() {
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-          }
-        />
-        <StatsCard
-          title="Quote pipeline value"
-          value={formatCurrency(quotePipelineValue)}
-          subtitle={`${quoteCount} quotes`}
-          icon={
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
             </svg>
           }
         />
@@ -109,9 +97,8 @@ export default function AutomationsDashboardPage() {
         />
         <StatsCard
           title="Won quotes"
-          value={String(MOCK_QUOTES.filter((q) => q.status === 'Won').length)}
+          value={String(quoteData?.quotes?.filter((q) => q.status === 'Won').length ?? 0)}
           subtitle="Converted"
-          trend={{ value: '+4.2%', positive: true }}
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
