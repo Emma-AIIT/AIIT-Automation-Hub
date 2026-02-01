@@ -106,7 +106,7 @@ export const quotePipelineRouter = createTRPCRouter({
         ("0" in data || "__ROW_NUMBER__" in data)
       ) {
         // Single row object (Make.com returns first bundle when using {{2}})
-        rawRows = [data as SheetRow];
+        rawRows = [data];
       } else if (data && typeof data === "object" && !Array.isArray(data)) {
         rawRows = (data as { rows?: SheetRow[]; bundles?: SheetRow[]; data?: SheetRow[] }).rows ??
           (data as { bundles?: SheetRow[] }).bundles ??
