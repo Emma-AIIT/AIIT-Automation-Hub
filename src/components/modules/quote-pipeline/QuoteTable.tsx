@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { Quote } from '@/lib/mock-data/quotes';
-import { MOCK_QUOTES } from '@/lib/mock-data/quotes';
+import { api } from '@/trpc/react';
 import { AvatarInitials } from '@/components/shared/AvatarInitials';
 import { QuoteFilters } from './QuoteFilters';
 import { QuoteDetailDrawer } from './QuoteDetailDrawer';
 
-const PAGE_SIZE = 6;
+const PAGE_SIZE_OPTIONS = [6, 10, 25, 50] as const;
+const DEFAULT_PAGE_SIZE = 10;
 
 /** Status: only these four with colors */
 const STATUS_OPTIONS: Quote['status'][] = ['Pre sales', 'Quote', 'Lost', 'Won'];
@@ -28,6 +29,8 @@ export const TRIGGER_OPTIONS = [
   '1 Month Reminder Sent',
   '2 Month Reminder Sent',
 ] as const;
+const EMPTY_QUOTES: Quote[] = [];
+
 const TRIGGER_PILL_CLASS: Record<string, string> = {
   'Send SMS Link': 'bg-amber-100 text-amber-800 border-amber-200',
   'SMS Link Sent': 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -44,12 +47,28 @@ export function QuoteTable() {
   const [source, setSource] = useState('all');
   const [period, setPeriod] = useState('all');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  /** Local overrides only when useMockData - edits are not persisted */
   const [statusOverrides, setStatusOverrides] = useState<Record<number, Quote['status']>>({});
   const [triggerOverrides, setTriggerOverrides] = useState<Record<number, string | null>>({});
 
+  const { data, isLoading, isError, refetch, isRefetching } = api.quotePipeline.getRows.useQuery(
+    undefined,
+    { refetchInterval: 60_000 }
+  );
+
+  const utils = api.useUtils();
+  const updateRow = api.quotePipeline.updateRow.useMutation({
+    onSuccess: () => {
+      void utils.quotePipeline.getRows.invalidate();
+    },
+  });
+
+  const useMockData = data?.useMockData ?? true;
+
   const filtered = useMemo(() => {
-    let results = MOCK_QUOTES;
+    let results = data?.quotes ?? EMPTY_QUOTES;
 
     if (search) {
       const q = search.toLowerCase();
@@ -65,112 +84,239 @@ export function QuoteTable() {
     if (source !== 'all') results = results.filter((r) => r.source === source);
 
     return results;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, source, period]);
+  }, [data?.quotes, search, status, source]);
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  const handleStatusChange = (quoteId: number, newStatus: Quote['status']) => {
-    setStatusOverrides((prev) => ({ ...prev, [quoteId]: newStatus }));
+  // Reset to page 1 when page size changes or when current page exceeds total
+  useEffect(() => {
+    const safePage = Math.min(page, totalPages) || 1;
+    if (page !== safePage) setPage(safePage);
+  }, [page, totalPages, pageSize]);
+
+  const handleStatusChange = (quote: Quote, newStatus: Quote['status']) => {
+    if (useMockData) {
+      setStatusOverrides((prev) => ({ ...prev, [quote.id]: newStatus }));
+      return;
+    }
+    const rowNum = quote.rowNumber ?? quote.id;
+    if (rowNum < 2) return;
+    updateRow.mutate({ rowNumber: rowNum, status: newStatus });
   };
-  const handleTriggerChange = (quoteId: number, newTrigger: string | null) => {
-    setTriggerOverrides((prev) => ({ ...prev, [quoteId]: newTrigger }));
+
+  const handleTriggerChange = (quote: Quote, newTrigger: string | null) => {
+    if (useMockData) {
+      setTriggerOverrides((prev) => ({ ...prev, [quote.id]: newTrigger }));
+      return;
+    }
+    const rowNum = quote.rowNumber ?? quote.id;
+    if (rowNum < 2) return;
+    updateRow.mutate({ rowNumber: rowNum, trigger: newTrigger });
   };
+
+  const displayStatus = (quote: Quote) =>
+    useMockData ? (statusOverrides[quote.id] ?? quote.status) : quote.status;
+  const displayTrigger = (quote: Quote) =>
+    useMockData
+      ? (triggerOverrides[quote.id] === undefined ? quote.trigger : (triggerOverrides[quote.id] ?? null))
+      : quote.trigger;
 
   return (
     <div className="space-y-4 lg:space-y-5">
-      <QuoteFilters
-        search={search}
-        onSearchChange={(v) => { setSearch(v); setPage(1); }}
-        status={status}
-        onStatusChange={(v) => { setStatus(v); setPage(1); }}
-        source={source}
-        onSourceChange={(v) => { setSource(v); setPage(1); }}
-        period={period}
-        onPeriodChange={(v) => { setPeriod(v); setPage(1); }}
-      />
+      {/* Mock data banner */}
+      {useMockData && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+          Quote Pipeline sync not configured. Using demo data. Add Make.com webhook URLs to enable live sync.
+        </div>
+      )}
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <QuoteFilters
+          search={search}
+          onSearchChange={(v) => { setSearch(v); setPage(1); }}
+          status={status}
+          onStatusChange={(v) => { setStatus(v); setPage(1); }}
+          source={source}
+          onSourceChange={(v) => { setSource(v); setPage(1); }}
+          period={period}
+          onPeriodChange={(v) => { setPeriod(v); setPage(1); }}
+        />
+        <button
+          onClick={() => void refetch()}
+          disabled={isRefetching}
+          className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-card)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 transition-colors"
+        >
+          <svg
+            className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Refresh
+        </button>
+      </div>
 
       <div className="relative overflow-hidden rounded-2xl border border-[var(--color-border-subtle)] bg-gradient-to-b from-[var(--color-bg-card)] to-[var(--color-bg-secondary)]">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[var(--color-border-strong)] to-transparent" />
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[var(--color-border-subtle)]">
-                <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Business Name</th>
-                <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Contact</th>
-                <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">File</th>
-                <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Date</th>
-                <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Trigger</th>
-                <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Source</th>
-                <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--color-border-subtle)]">
-              {paginated.map((quote) => (
-                <QuoteRow
-                  key={quote.id}
-                  quote={quote}
-                  displayStatus={statusOverrides[quote.id] ?? quote.status}
-                  displayTrigger={triggerOverrides[quote.id] === undefined ? quote.trigger : (triggerOverrides[quote.id] ?? null)}
-                  onStatusChange={(s) => handleStatusChange(quote.id, s)}
-                  onTriggerChange={(t) => handleTriggerChange(quote.id, t)}
-                  onRowClick={() =>
-                    setSelectedQuote({
-                      ...quote,
-                      status: statusOverrides[quote.id] ?? quote.status,
-                      trigger: triggerOverrides[quote.id] ?? quote.trigger,
-                    })
-                  }
-                />
-              ))}
-              {paginated.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="text-center py-12 text-sm text-[var(--color-text-muted)]">
-                    No quotes found matching your filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        <div className="flex items-center justify-between px-4 lg:px-6 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/50">
-          <span className="text-sm text-[var(--color-text-muted)]">
-            Showing {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} to{' '}
-            {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} quotes
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 text-sm font-medium text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
-            >
-              Previous
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                className={`w-8 h-8 text-sm font-medium rounded-lg transition-colors ${
-                  p === page
-                    ? 'bg-blue-600 text-white'
-                    : 'text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages || totalPages === 0}
-              className="px-3 py-1.5 text-sm font-medium text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
-            >
-              Next
-            </button>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
           </div>
-        </div>
+        ) : isError ? (
+          <div className="py-12 text-center text-sm text-red-600 dark:text-red-400">
+            Failed to load quotes. Try refreshing.
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[var(--color-border-subtle)]">
+                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Business Name</th>
+                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Contact</th>
+                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">File</th>
+                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Date</th>
+                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Trigger</th>
+                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Source</th>
+                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-border-subtle)]">
+                  {paginated.map((quote) => (
+                    <QuoteRow
+                      key={quote.id}
+                      quote={quote}
+                      displayStatus={displayStatus(quote)}
+                      displayTrigger={displayTrigger(quote)}
+                      onStatusChange={(s) => handleStatusChange(quote, s)}
+                      onTriggerChange={(t) => handleTriggerChange(quote, t)}
+                      onRowClick={() =>
+                        setSelectedQuote({
+                          ...quote,
+                          status: displayStatus(quote),
+                          trigger: displayTrigger(quote),
+                        })
+                      }
+                      isUpdating={updateRow.isPending}
+                    />
+                  ))}
+                  {paginated.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="text-center py-12 text-sm text-[var(--color-text-muted)]">
+                        No quotes found matching your filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            <div className="flex flex-col gap-3 px-4 lg:px-6 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/50 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="text-sm text-[var(--color-text-muted)]">
+                  Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to{' '}
+                  {Math.min(page * pageSize, filtered.length)} of {filtered.length} quotes
+                </span>
+                <div className="flex items-center gap-2">
+                  <label htmlFor="page-size" className="text-sm text-[var(--color-text-muted)]">
+                    Per page:
+                  </label>
+                  <select
+                    id="page-size"
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value) as (typeof PAGE_SIZE_OPTIONS)[number]);
+                      setPage(1);
+                    }}
+                    className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-card)] px-2.5 py-1.5 text-sm text-[var(--color-text-secondary)] focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(1)}
+                  disabled={page === 1}
+                  className="px-2.5 py-1.5 text-sm font-medium text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  title="First page"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 text-sm font-medium text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Previous
+                </button>
+                <div className="flex items-center gap-0.5">
+                  {(() => {
+                    const pages: (number | 'ellipsis')[] = [];
+                    const maxVisible = 7;
+                    if (totalPages <= maxVisible) {
+                      for (let i = 1; i <= totalPages; i++) pages.push(i);
+                    } else {
+                      const alwaysShow = [1, totalPages];
+                      const around = [page - 1, page, page + 1].filter((p) => p >= 1 && p <= totalPages);
+                      const unique = [...new Set([...alwaysShow, ...around])].sort((a, b) => a - b);
+                      for (let i = 0; i < unique.length; i++) {
+                        if (i > 0 && unique[i]! - unique[i - 1]! > 1) pages.push('ellipsis');
+                        pages.push(unique[i]!);
+                      }
+                    }
+                    return pages.map((p, idx) =>
+                      p === 'ellipsis' ? (
+                        <span key={`ellipsis-${idx}`} className="px-2 py-1 text-[var(--color-text-muted)]">
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => setPage(p)}
+                          className={`min-w-[2rem] px-2 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                            p === page
+                              ? 'bg-blue-600 text-white'
+                              : 'text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      )
+                    );
+                  })()}
+                </div>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages || totalPages === 0}
+                  className="px-3 py-1.5 text-sm font-medium text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Next
+                </button>
+                <button
+                  onClick={() => setPage(totalPages)}
+                  disabled={page === totalPages || totalPages === 0}
+                  className="px-2.5 py-1.5 text-sm font-medium text-[var(--color-text-secondary)] bg-[var(--color-bg-card)] border border-[var(--color-border-default)] rounded-lg hover:bg-[var(--color-bg-hover)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  title="Last page"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       <QuoteDetailDrawer quote={selectedQuote} onClose={() => setSelectedQuote(null)} />
@@ -185,6 +331,7 @@ function QuoteRow({
   onStatusChange,
   onTriggerChange,
   onRowClick,
+  isUpdating,
 }: {
   quote: Quote;
   displayStatus: Quote['status'];
@@ -192,13 +339,14 @@ function QuoteRow({
   onStatusChange: (s: Quote['status']) => void;
   onTriggerChange: (t: string | null) => void;
   onRowClick: () => void;
+  isUpdating?: boolean;
 }) {
   const statusPillClass = STATUS_PILL_CLASS[displayStatus] ?? 'bg-gray-100 text-gray-700 border-gray-200';
   const triggerPillClass = displayTrigger ? (TRIGGER_PILL_CLASS[displayTrigger] ?? 'bg-gray-100 text-gray-700 border-gray-200') : '';
 
   return (
     <tr
-      className="border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer"
+      className={`border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer ${isUpdating ? 'opacity-70' : ''}`}
       onClick={onRowClick}
       role="button"
       tabIndex={0}
@@ -261,7 +409,8 @@ function QuoteRow({
         <select
           value={displayTrigger ?? ''}
           onChange={(e) => onTriggerChange(e.target.value || null)}
-          className={`min-w-[140px] px-2.5 py-1.5 rounded-full border text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right ${triggerPillClass || 'bg-gray-50 text-gray-600 border-gray-200'}`}
+          disabled={isUpdating}
+          className={`min-w-[140px] px-2.5 py-1.5 rounded-full border text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right disabled:opacity-60 disabled:cursor-not-allowed ${triggerPillClass || 'bg-gray-50 text-gray-600 border-gray-200'}`}
           style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 8px center' }}
         >
           <option value="">—</option>
@@ -285,7 +434,8 @@ function QuoteRow({
         <select
           value={STATUS_OPTIONS.includes(displayStatus) ? displayStatus : STATUS_OPTIONS[0]}
           onChange={(e) => onStatusChange(e.target.value as Quote['status'])}
-          className={`min-w-[100px] px-2.5 py-1.5 rounded-full border text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right ${statusPillClass}`}
+          disabled={isUpdating}
+          className={`min-w-[100px] px-2.5 py-1.5 rounded-full border text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right disabled:opacity-60 disabled:cursor-not-allowed ${statusPillClass}`}
           style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 8px center' }}
         >
           {STATUS_OPTIONS.map((opt) => (

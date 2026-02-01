@@ -15,6 +15,8 @@ export interface Quote {
   file: string | null;
   /** Dropbox file path (Dropbox File Path column) */
   dropboxFilePath: string | null;
+  /** Google Sheet row number (1-based); used for updates when synced */
+  rowNumber?: number;
 }
 
 export const MOCK_QUOTES: Quote[] = [

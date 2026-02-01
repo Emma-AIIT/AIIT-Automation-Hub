@@ -1,10 +1,15 @@
-import { MOCK_QUOTES } from '@/lib/mock-data/quotes';
+'use client';
+
+import { api } from '@/trpc/react';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 
 export function QuoteStats() {
-  const totalQuotes = MOCK_QUOTES.length;
-  const pipelineValue = MOCK_QUOTES.reduce((sum, q) => sum + q.value, 0);
-  const wonQuotes = MOCK_QUOTES.filter((q) => q.status === 'Won').length;
+  const { data } = api.quotePipeline.getRows.useQuery();
+  const quotes = data?.quotes ?? [];
+
+  const totalQuotes = quotes.length;
+  const pipelineValue = quotes.reduce((sum, q) => sum + q.value, 0);
+  const wonQuotes = quotes.filter((q) => q.status === 'Won').length;
   const winRate = totalQuotes > 0 ? ((wonQuotes / totalQuotes) * 100).toFixed(1) : '0';
 
   return (

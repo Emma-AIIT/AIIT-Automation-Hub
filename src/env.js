@@ -10,6 +10,8 @@ export const env = createEnv({
     NODE_ENV: z.enum(["development", "test", "production"]),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
     MAKE_SYNC_WEBHOOK_URL: z.string().url().optional(),
+    MAKE_QUOTE_PIPELINE_GET_WEBHOOK_URL: z.string().url().optional(),
+    MAKE_QUOTE_PIPELINE_UPDATE_WEBHOOK_URL: z.string().url().optional(),
   },
 
   /**
@@ -32,6 +34,10 @@ export const env = createEnv({
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     MAKE_SYNC_WEBHOOK_URL: process.env.MAKE_SYNC_WEBHOOK_URL,
+    MAKE_QUOTE_PIPELINE_GET_WEBHOOK_URL:
+      process.env.MAKE_QUOTE_PIPELINE_GET_WEBHOOK_URL,
+    MAKE_QUOTE_PIPELINE_UPDATE_WEBHOOK_URL:
+      process.env.MAKE_QUOTE_PIPELINE_UPDATE_WEBHOOK_URL,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially
