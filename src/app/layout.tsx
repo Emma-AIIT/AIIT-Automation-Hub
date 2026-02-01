@@ -1,13 +1,10 @@
 import "@/styles/globals.css";
-import { GeistSans } from "geist/font/sans";
 import { type Metadata } from "next";
 import { TRPCReactProvider } from "@/trpc/react";
-import { ThemeProvider } from "@/lib/ThemeContext";
-import { Toaster } from "react-hot-toast";
 
 export const metadata: Metadata = {
-  title: "Debt Recovery Hub",
-  description: "Professional debt collection management",
+  title: "AIIT Automation Hub",
+  description: "All In IT Solutions — Automation Control Panel",
   icons: [{ rel: "icon", url: "/favicon.ico" }],
 };
 
@@ -15,35 +12,18 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${GeistSans.variable}`} suppressHydrationWarning>
-      <body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="font-sans antialiased">
         <TRPCReactProvider>
-          <ThemeProvider>
-            {children}
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 4000,
-                style: {
-                  background: "var(--color-bg-card)",
-                  color: "var(--color-text-primary)",
-                  border: "1px solid var(--color-border-default)",
-                },
-                success: {
-                  iconTheme: {
-                    primary: "#3b82f6",
-                    secondary: "#fff",
-                  },
-                },
-                error: {
-                  iconTheme: {
-                    primary: "#ef4444",
-                    secondary: "#fff",
-                  },
-                },
-              }}
-            />
-          </ThemeProvider>
+          {children}
         </TRPCReactProvider>
       </body>
     </html>
