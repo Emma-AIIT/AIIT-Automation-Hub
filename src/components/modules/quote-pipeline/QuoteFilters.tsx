@@ -22,12 +22,12 @@ export function QuoteFilters({
   onPeriodChange,
 }: QuoteFiltersProps) {
   const selectClasses =
-    'h-9 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-input-bg)] text-sm text-[var(--color-text-secondary)] px-3 pr-8 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-[var(--color-border-strong)] transition-colors';
+    'h-9 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-input-bg)] text-sm text-[var(--color-text-secondary)] px-3 pr-8 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-[var(--color-border-strong)] transition-colors min-w-0 flex-1 sm:flex-initial sm:min-w-[120px]';
 
   return (
-    <div className="bg-[var(--color-bg-card)] border border-[var(--color-border-subtle)] rounded-2xl p-4 flex flex-wrap items-center gap-3">
-      {/* Search */}
-      <div className="relative flex-1 min-w-[200px]">
+    <div className="bg-[var(--color-bg-card)] border border-[var(--color-border-subtle)] rounded-2xl p-3 sm:p-4 flex flex-wrap items-center gap-3">
+      {/* Search - full width on mobile */}
+      <div className="relative flex-1 min-w-0 w-full sm:min-w-[200px] sm:w-auto">
         <svg
           className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)]"
           width="15"

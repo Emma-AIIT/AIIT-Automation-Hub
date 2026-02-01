@@ -12,7 +12,7 @@ export function QuoteStats() {
   const wonQuotes = quotes.filter((q) => q.status === 'Won').length;
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
       <StatsCard
         title="Total Quotes"
         value={totalQuotes}

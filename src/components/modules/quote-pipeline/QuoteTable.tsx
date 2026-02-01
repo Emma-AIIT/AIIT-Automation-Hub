@@ -126,7 +126,7 @@ export function QuoteTable() {
     <div className="space-y-4 lg:space-y-5">
       {/* Mock data banner */}
       {useMockData && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 sm:px-4 py-3 text-xs sm:text-sm text-amber-800 dark:text-amber-200">
           Quote Pipeline sync not configured. Using demo data. Add Make.com webhook URLs to enable live sync.
         </div>
       )}
@@ -145,7 +145,7 @@ export function QuoteTable() {
         <button
           onClick={() => void refetch()}
           disabled={isRefetching}
-          className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-card)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 transition-colors"
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-card)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 transition-colors w-full sm:w-auto"
         >
           <svg
             className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`}
@@ -171,8 +171,36 @@ export function QuoteTable() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            {/* Mobile: Card layout */}
+            <div className="md:hidden divide-y divide-[var(--color-border-subtle)]">
+              {paginated.map((quote) => (
+                <QuoteCard
+                  key={quote.id}
+                  quote={quote}
+                  displayStatus={displayStatus(quote)}
+                  displayTrigger={displayTrigger(quote)}
+                  onStatusChange={(s) => handleStatusChange(quote, s)}
+                  onTriggerChange={(t) => handleTriggerChange(quote, t)}
+                  onCardClick={() =>
+                    setSelectedQuote({
+                      ...quote,
+                      status: displayStatus(quote),
+                      trigger: displayTrigger(quote),
+                    })
+                  }
+                  isUpdating={updateRow.isPending}
+                />
+              ))}
+              {paginated.length === 0 && (
+                <div className="px-4 py-12 text-center text-sm text-[var(--color-text-muted)]">
+                  No quotes found matching your filters.
+                </div>
+              )}
+            </div>
+
+            {/* Desktop: Table layout */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full min-w-[700px]">
                 <thead>
                   <tr className="border-b border-[var(--color-border-subtle)]">
                     <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Business Name</th>
@@ -215,9 +243,9 @@ export function QuoteTable() {
             </div>
 
             {/* Pagination */}
-            <div className="flex flex-col gap-3 px-4 lg:px-6 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/50 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-4">
-                <span className="text-sm text-[var(--color-text-muted)]">
+            <div className="flex flex-col gap-3 px-3 sm:px-4 lg:px-6 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/50 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                <span className="text-xs sm:text-sm text-[var(--color-text-muted)]">
                   Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to{' '}
                   {Math.min(page * pageSize, filtered.length)} of {filtered.length} quotes
                 </span>
@@ -242,7 +270,7 @@ export function QuoteTable() {
                   </select>
                 </div>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center justify-center sm:justify-end gap-1 overflow-x-auto">
                 <button
                   onClick={() => setPage(1)}
                   disabled={page === 1}
@@ -320,6 +348,96 @@ export function QuoteTable() {
       </div>
 
       <QuoteDetailDrawer quote={selectedQuote} onClose={() => setSelectedQuote(null)} />
+    </div>
+  );
+}
+
+function QuoteCard({
+  quote,
+  displayStatus,
+  displayTrigger,
+  onStatusChange,
+  onTriggerChange,
+  onCardClick,
+  isUpdating,
+}: {
+  quote: Quote;
+  displayStatus: Quote['status'];
+  displayTrigger: string | null;
+  onStatusChange: (s: Quote['status']) => void;
+  onTriggerChange: (t: string | null) => void;
+  onCardClick: () => void;
+  isUpdating?: boolean;
+}) {
+  const statusPillClass = STATUS_PILL_CLASS[displayStatus] ?? 'bg-gray-100 text-gray-700 border-gray-200';
+  const triggerPillClass = displayTrigger ? (TRIGGER_PILL_CLASS[displayTrigger] ?? 'bg-gray-100 text-gray-700 border-gray-200') : '';
+
+  return (
+    <div
+      className={`px-4 py-3 active:bg-[var(--color-bg-hover)] transition-colors cursor-pointer ${isUpdating ? 'opacity-70' : ''}`}
+      onClick={onCardClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onCardClick();
+        }
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <AvatarInitials name={quote.businessName} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-[var(--color-text-primary)] truncate">{quote.businessName}</div>
+              <div className="text-xs text-[var(--color-text-muted)] truncate">{quote.contactName ?? quote.email ?? '—'}</div>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-600 border border-blue-500/20">
+              {quote.source}
+            </span>
+            <span className="text-[10px] text-[var(--color-text-muted)]">{quote.date}</span>
+            {quote.file && (
+              <a
+                href={quote.file}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-blue-600 hover:underline text-[10px]"
+              >
+                Link
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+          <select
+            value={displayTrigger ?? ''}
+            onChange={(e) => onTriggerChange(e.target.value || null)}
+            disabled={isUpdating}
+            className={`w-full max-w-[130px] px-2 py-1 rounded-full border text-[10px] font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right disabled:opacity-60 ${triggerPillClass || 'bg-gray-50 text-gray-600 border-gray-200'}`}
+            style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 6px center' }}
+          >
+            <option value="">—</option>
+            {TRIGGER_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+          <select
+            value={STATUS_OPTIONS.includes(displayStatus) ? displayStatus : STATUS_OPTIONS[0]}
+            onChange={(e) => onStatusChange(e.target.value as Quote['status'])}
+            disabled={isUpdating}
+            className={`w-full max-w-[100px] px-2 py-1 rounded-full border text-[10px] font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right disabled:opacity-60 ${statusPillClass}`}
+            style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 6px center' }}
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        </div>
+      </div>
     </div>
   );
 }

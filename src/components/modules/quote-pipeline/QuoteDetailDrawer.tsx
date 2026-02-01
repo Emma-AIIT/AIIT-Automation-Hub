@@ -25,14 +25,14 @@ export function QuoteDetailDrawer({ quote, onClose }: QuoteDetailDrawerProps) {
         onClick={onClose}
         aria-hidden
       />
-      {/* Drawer */}
+      {/* Drawer - full screen on mobile, side panel on desktop */}
       <div
-        className="fixed top-0 right-0 bottom-0 w-full max-w-md bg-[var(--color-bg-card)] border-l border-[var(--color-border-default)] shadow-xl z-50 flex flex-col overflow-hidden"
+        className="fixed top-0 right-0 bottom-0 w-full sm:max-w-md bg-[var(--color-bg-card)] border-l border-[var(--color-border-default)] shadow-xl z-50 flex flex-col overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="quote-detail-title"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border-subtle)]">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-[var(--color-border-subtle)] pt-[max(1rem,env(safe-area-inset-top))] sm:pt-4">
           <h2 id="quote-detail-title" className="text-lg font-semibold text-[var(--color-text-primary)] truncate pr-4">
             {quote.businessName}
           </h2>
@@ -48,7 +48,7 @@ export function QuoteDetailDrawer({ quote, onClose }: QuoteDetailDrawerProps) {
             </svg>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 pb-[env(safe-area-inset-bottom)]">
           {detailRow('Business Name', quote.businessName)}
           {detailRow('Name', quote.contactName ?? quote.company)}
           {detailRow('Email', quote.email ? <a href={`mailto:${quote.email}`} className="text-blue-600 hover:underline">{quote.email}</a> : null)}
