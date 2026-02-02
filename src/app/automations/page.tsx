@@ -1,81 +1,177 @@
 'use client';
 
-import Link from 'next/link';
+import { useMemo } from 'react';
+import { formatDistanceToNow } from 'date-fns';
 import { api } from '@/trpc/react';
-import { SIDEBAR_MODULES } from '@/lib/mock-data/quotes';
 import { StatsCard } from '@/components/dashboard/StatsCard';
+import { ActivityTimeline, type ActivityItem } from '@/components/dashboard/ActivityTimeline';
+import { AgentStatusCards, type AgentStatusItem } from '@/components/dashboard/AgentStatusCards';
+import { ModuleCard } from '@/components/dashboard/ModuleCard';
+import { AGENT_CONFIGS } from '@/config/voice-agents';
+import type { VapiCall } from '@/types/vapi';
+import type { SupportTicket } from '@/types/tickets';
+import type { Quote } from '@/lib/mock-data/quotes';
+
+function getLast24hRange(): { dateFrom: string; dateTo: string } {
+  const now = new Date();
+  const dateTo = new Date(now);
+  dateTo.setSeconds(59, 999);
+  const dateFrom = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  return { dateFrom: dateFrom.toISOString(), dateTo: dateTo.toISOString() };
+}
+
+function quoteToSortKey(q: Quote): number {
+  const [d, m, y] = (q.date ?? '').split('-').map(Number);
+  if (!y || !m || !d) return 0;
+  const hourMatch = q.time ? /(\d+)/.exec(q.time) : null;
+  const minuteMatch = q.time ? /:(\d+)/.exec(q.time) : null;
+  const hour = hourMatch?.[1] ?? 0;
+  const minute = minuteMatch?.[1] ?? 0;
+  const pm = /pm/i.test(q.time ?? '');
+  const h = Number(hour) + (pm ? 12 : 0);
+  return new Date(y, m - 1, d, h, Number(minute)).getTime();
+}
+
+interface ActivityWithSort {
+  item: ActivityItem;
+  sortKey: number;
+}
+
+const ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function buildActivities(
+  calls: VapiCall[],
+  assistantNameMap: Record<string, string>,
+  tickets: SupportTicket[],
+  quotes: Quote[]
+): ActivityItem[] {
+  const cutoff = Date.now() - ACTIVITY_WINDOW_MS;
+  const withSort: ActivityWithSort[] = [];
+
+  calls.slice(0, 10).forEach((call) => {
+    const started = new Date(call.startedAt).getTime();
+    if (Number.isNaN(started)) return;
+    const isInbound = call.type === 'inboundPhoneCall';
+    const assistantName = assistantNameMap[call.assistantId] ?? 'Assistant';
+    const customerNumber = call.customer?.number ?? 'unknown';
+    withSort.push({
+      sortKey: started,
+      item: {
+        id: `call-${call.id}`,
+        type: 'call',
+        title: isInbound ? 'Inbound call received' : 'Outbound call made',
+        description: `${assistantName} ${isInbound ? 'handled inquiry from' : 'followed up with'} ${customerNumber}`,
+        time: formatDistanceToNow(new Date(call.startedAt), { addSuffix: true }),
+      },
+    });
+  });
+
+  tickets.slice(0, 5).forEach((ticket) => {
+    const created = new Date(ticket.created_at).getTime();
+    if (Number.isNaN(created) || created < cutoff) return;
+    withSort.push({
+      sortKey: created,
+      item: {
+        id: `ticket-${ticket.id}`,
+        type: 'ticket',
+        title: 'Support ticket opened',
+        description: ticket.inquiry?.slice(0, 60) ?? 'Customer support request',
+        time: formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true }),
+      },
+    });
+  });
+
+  const sortedQuotes = [...quotes].sort((a, b) => quoteToSortKey(b) - quoteToSortKey(a));
+  sortedQuotes.slice(0, 5).forEach((q) => {
+    const key = quoteToSortKey(q);
+    if (!key || key < cutoff) return;
+    withSort.push({
+      sortKey: key,
+      item: {
+        id: `quote-${q.id}`,
+        type: 'quote',
+        title: 'New quote created',
+        description: q.businessName,
+        time: formatDistanceToNow(new Date(key), { addSuffix: true }),
+      },
+    });
+  });
+
+  return withSort
+    .sort((a, b) => b.sortKey - a.sortKey)
+    .slice(0, 8)
+    .map((x) => x.item);
+}
 
 export default function AutomationsDashboardPage() {
+  const { dateFrom, dateTo } = useMemo(getLast24hRange, []);
+
   const { data: debtStats, isLoading: debtStatsLoading } = api.clients.getStats.useQuery();
   const { data: quoteData } = api.quotePipeline.getRows.useQuery();
+  const { data: calls, isLoading: callsLoading } = api.vapi.getCalls.useQuery(
+    { limit: 50, createdAtGt: dateFrom, createdAtLt: dateTo },
+    { retry: false }
+  );
+  const { data: tickets = [] } = api.tickets.getAll.useQuery({ limit: 10 }, { retry: false });
+  const { data: ticketStats } = api.tickets.getStats.useQuery();
+
   const quoteCount = quoteData?.quotes?.length ?? 0;
+  const wonCount = quoteData?.quotes?.filter((q) => q.status === 'Won').length ?? 0;
+
+  const assistantNameMap = useMemo(
+    () => Object.fromEntries(AGENT_CONFIGS.map((c) => [c.assistantId, c.name])),
+    []
+  );
+
+  const activities = useMemo(
+    () => buildActivities(calls ?? [], assistantNameMap, tickets, quoteData?.quotes ?? []),
+    [calls, tickets, quoteData?.quotes, assistantNameMap]
+  );
+
+  const agentStatusItems: AgentStatusItem[] = useMemo(() => {
+    const list = calls ?? [];
+    return AGENT_CONFIGS.map((config) => {
+      const agentCalls = list.filter((c) => c.assistantId === config.assistantId);
+      const hasActiveCall = agentCalls.some((c) => c.status === 'in-progress');
+      const count = agentCalls.length;
+      return {
+        id: config.id,
+        name: config.name,
+        phoneNumber: config.phoneNumber,
+        status: hasActiveCall ? 'on-call' : count > 0 ? 'active' : 'idle',
+        callsInPeriod: count,
+      };
+    });
+  }, [calls]);
+
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(amount);
 
-  const automationCards = [
-    {
-      id: 'debt-recovery',
-      label: 'Debt Recovery',
-      route: '/automations/debt-recovery',
-      description: 'Manage and track client balances',
-      icon: (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-        </svg>
-      ),
-      stat: debtStats ? formatCurrency(debtStats.totalOutstanding) : debtStatsLoading ? '…' : '—',
-      statLabel: 'Total Outstanding',
-      active: true,
-    },
-    {
-      id: 'quote-pipeline',
-      label: 'Quote Pipeline',
-      route: '/automations/quote-pipeline',
-      description: 'Track and convert quotes from Google Sheets',
-      icon: (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-          <line x1="16" y1="13" x2="8" y2="13" />
-          <line x1="16" y1="17" x2="8" y2="17" />
-        </svg>
-      ),
-      stat: quoteCount,
-      statLabel: 'quotes',
-      active: true,
-    },
-    {
-      id: 'lead-tracker',
-      label: 'Lead Tracker',
-      route: '#',
-      description: 'Track leads and follow-ups',
-      icon: (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-          <circle cx="9" cy="7" r="4" />
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-        </svg>
-      ),
-      stat: 'Soon',
-      statLabel: 'Coming soon',
-      active: false,
-    },
-  ];
-
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 md:p-8 space-y-8 max-w-7xl">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text-primary)] tracking-tight">Overview</h1>
-        <p className="text-sm text-[var(--color-text-muted)] mt-1">Your automations at a glance</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-[var(--color-brand-navy)] tracking-tight">AI Operations Center</h1>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">Welcome back, All In IT Solutions</p>
+        </div>
       </div>
 
-      {/* Quick stats - same styling as debt recovery */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Top Metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <StatsCard
-          title="Debt outstanding"
-          value={debtStats ? formatCurrency(debtStats.totalOutstanding) : debtStatsLoading ? '…' : '—'}
+          title="Active Agents"
+          value={AGENT_CONFIGS.length}
+          subtitle="VAPI voice agents"
+          icon={
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
+          }
+        />
+        <StatsCard
+          title="Outstanding Debt"
+          value={debtStats ? formatCurrency(debtStats.totalOutstanding) : debtStatsLoading ? '...' : '-'}
           subtitle={debtStats ? `${debtStats.totalClients} clients` : 'Debt Recovery'}
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -84,9 +180,9 @@ export default function AutomationsDashboardPage() {
           }
         />
         <StatsCard
-          title="At risk (debt)"
-          value={debtStats?.atRisk ?? (debtStatsLoading ? '…' : '—')}
-          subtitle="1–3 weeks overdue"
+          title="At Risk"
+          value={debtStats?.atRisk ?? (debtStatsLoading ? '...' : '-')}
+          subtitle="1-3 weeks overdue"
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -96,9 +192,9 @@ export default function AutomationsDashboardPage() {
           }
         />
         <StatsCard
-          title="Won quotes"
-          value={String(quoteData?.quotes?.filter((q) => q.status === 'Won').length ?? 0)}
-          subtitle="Converted"
+          title="Won Quotes"
+          value={wonCount}
+          subtitle={`${quoteCount} total quotes`}
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
@@ -107,80 +203,68 @@ export default function AutomationsDashboardPage() {
         />
       </div>
 
-      {/* Automation cards - link to each module */}
-      <div>
-        <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">Automations</h2>
-        <p className="text-sm text-[var(--color-text-muted)] mb-4">Open an automation to manage it</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {automationCards.map((card) => {
-            const content = (
-              <div
-                className={`
-                  group relative overflow-hidden rounded-2xl border p-5 transition-all duration-300
-                  ${card.active
-                    ? 'border-[var(--color-border-subtle)] bg-gradient-to-br from-[var(--color-bg-card)] to-[var(--color-bg-secondary)] hover:border-[var(--color-border-default)] hover:shadow-xl hover:shadow-black/20 cursor-pointer'
-                    : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] opacity-75 cursor-default'
-                  }
-                `}
-              >
-                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[var(--color-border-strong)] to-transparent opacity-50" />
-                <div className="relative flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/15 to-purple-500/10 border border-blue-500/10 flex items-center justify-center text-blue-400">
-                      {card.icon}
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] truncate">{card.label}</h3>
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">{card.description}</p>
-                    </div>
-                  </div>
-                  {card.active && (
-                    <span className="flex-shrink-0 text-[var(--color-text-faint)] group-hover:translate-x-0.5 transition-transform">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
-                    </span>
-                  )}
-                </div>
-                <div className="mt-4 pt-4 border-t border-[var(--color-border-subtle)]">
-                  <div className="text-[10px] font-medium text-[var(--color-text-faint)] uppercase tracking-[0.1em]">{card.statLabel}</div>
-                  <div className="text-lg font-bold text-[var(--color-text-primary)] tracking-tight mt-0.5">{card.stat}</div>
-                </div>
-                {!card.active && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-[var(--color-bg-card)]/60 rounded-2xl">
-                    <span className="text-xs font-medium text-[var(--color-text-muted)] px-3 py-1.5 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)]">Coming soon</span>
-                  </div>
-                )}
-              </div>
-            );
-
-            if (card.active) {
-              return <Link key={card.id} href={card.route}>{content}</Link>;
-            }
-            return <div key={card.id}>{content}</div>;
-          })}
+      {/* Main Grid - Activity Timeline + Quick Links */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:items-stretch">
+        <div className="lg:col-span-2 h-full min-h-0">
+          <ActivityTimeline activities={activities} isLoading={callsLoading} />
+        </div>
+        <div className="h-full min-h-0">
+          <AgentStatusCards agents={agentStatusItems} isLoading={callsLoading} />
         </div>
       </div>
 
-      {/* Quick links matching sidebar */}
-      <div className="pt-2">
-        <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">Quick links</h2>
-        <p className="text-sm text-[var(--color-text-muted)] mb-4">Jump to an automation</p>
-        <div className="flex flex-wrap gap-2">
-          {SIDEBAR_MODULES.filter((m) => !m.disabled).map((mod) => (
-            <Link
-              key={mod.id}
-              href={mod.route}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-card)] text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)] transition-colors"
-            >
-              {mod.label}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
+      {/* Module Cards */}
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">Automations</h2>
+        <p className="text-sm text-[var(--color-text-muted)] mb-4">Manage your automated workflows</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <ModuleCard
+            title="Voice Agents"
+            description="Manage VAPI assistants and call logs"
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
               </svg>
-            </Link>
-          ))}
+            }
+            stats={{ agents: AGENT_CONFIGS.length }}
+            href="/automations/voice-agents"
+          />
+          <ModuleCard
+            title="Debt Recovery"
+            description="Track client balances and outreach"
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
+            }
+            stats={{ outstanding: debtStats ? formatCurrency(debtStats.totalOutstanding) : '-' }}
+            href="/automations/debt-recovery"
+          />
+          <ModuleCard
+            title="Quote Pipeline"
+            description="Convert leads to clients"
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            }
+            stats={{ quotes: quoteCount, won: wonCount }}
+            href="/automations/quote-pipeline"
+          />
+          <ModuleCard
+            title="IT Support"
+            description="Customer support tickets"
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M3 9h18" />
+                <path d="M3 15h18" />
+              </svg>
+            }
+            stats={{ tickets: ticketStats?.total ?? 0 }}
+            href="/automations/tickets"
+          />
         </div>
       </div>
     </div>

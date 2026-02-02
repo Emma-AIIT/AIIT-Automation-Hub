@@ -10,23 +10,23 @@ interface StatusBadgeProps {
 const statusConfig = {
   current: {
     label: 'Current',
-    dotColor: 'bg-emerald-400',
-    className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    dotColor: 'bg-emerald-500',
+    className: 'bg-emerald-50 text-emerald-700 border-emerald-200/50',
   },
   warning: {
     label: 'Warning',
-    dotColor: 'bg-amber-400',
-    className: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    dotColor: 'bg-amber-500',
+    className: 'bg-amber-50 text-amber-700 border-amber-200/50',
   },
   critical: {
     label: 'Critical',
-    dotColor: 'bg-rose-400',
-    className: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+    dotColor: 'bg-rose-500',
+    className: 'bg-rose-50 text-rose-700 border-rose-200/50',
   },
   suspended: {
     label: 'Suspended',
     dotColor: 'bg-gray-400',
-    className: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
+    className: 'bg-gray-100 text-gray-600 border-gray-200/50',
   },
 };
 

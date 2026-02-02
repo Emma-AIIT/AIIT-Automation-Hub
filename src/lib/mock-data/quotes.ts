@@ -298,7 +298,7 @@ export interface SidebarModule {
   id: string;
   label: string;
   route: string;
-  icon: "dollar" | "document" | "users" | "settings" | "home";
+  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket";
   badge?: { count: number; color: "red" | "blue" };
   disabled?: boolean;
   comingSoon?: boolean;
@@ -316,6 +316,18 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     label: "Quote Pipeline",
     route: "/automations/quote-pipeline",
     icon: "document",
+  },
+  {
+    id: "voice-agents",
+    label: "Voice Agents",
+    route: "/automations/voice-agents",
+    icon: "phone",
+  },
+  {
+    id: "tickets",
+    label: "IT Support",
+    route: "/automations/tickets",
+    icon: "ticket",
   },
   {
     id: "lead-tracker",

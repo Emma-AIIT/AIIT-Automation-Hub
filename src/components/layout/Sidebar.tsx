@@ -14,7 +14,7 @@ export function Sidebar() {
     <>
       {/* Mobile overlay backdrop */}
       <div
-        className={`md:hidden fixed inset-0 bg-black/50 z-40 transition-opacity duration-300 ${
+        className={`md:hidden fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ${
           mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={closeMobile}
@@ -29,23 +29,23 @@ export function Sidebar() {
           ${collapsed ? 'md:!w-[72px]' : ''}
         `}
       >
-      {/* Layered background */}
-      <div className="absolute inset-0 bg-[#0a0e1a]" />
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0f1628]/80 via-[#0a0e1a] to-[#060914]" />
-      {/* Subtle side glow */}
-      <div className="absolute top-0 right-0 w-px h-full bg-gradient-to-b from-transparent via-white/[0.06] to-transparent" />
+      {/* Light background */}
+      <div className="absolute inset-0 bg-white" />
+      <div className="absolute inset-0 bg-gradient-to-b from-gray-50/50 via-white to-gray-50/30" />
+      {/* Right border */}
+      <div className="absolute top-0 right-0 w-px h-full bg-[var(--color-border-subtle)]" />
 
       {/* Brand + mobile close button */}
       <div className="relative px-3 pt-7 pb-6 flex items-center justify-between md:justify-start">
         <Link href="/automations" onClick={closeMobile} className={`flex items-center gap-3 group ${collapsed ? 'md:justify-center md:w-full' : ''}`}>
-          <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:shadow-blue-500/30 transition-shadow duration-300 flex-shrink-0">
+          <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-[#50a1fe] to-[#3d8ee8] flex items-center justify-center shadow-lg shadow-[var(--color-accent-shadow)] group-hover:shadow-[0_0_0_4px_rgba(80,161,254,0.2)] transition-shadow duration-300 flex-shrink-0">
             <span className="text-white text-sm font-bold tracking-tight">A</span>
             <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
           </div>
           {!collapsed && (
             <div className="leading-tight min-w-0">
-              <div className="text-[14px] font-bold text-white/95 tracking-[-0.01em]">AIIT</div>
-              <div className="text-[11px] text-white/30 font-medium tracking-wide">Automation Hub</div>
+              <div className="text-[14px] font-bold text-[var(--color-brand-navy)] tracking-[-0.01em]">AIIT</div>
+              <div className="text-[11px] text-[var(--color-text-muted)] font-medium tracking-wide">Operations Center</div>
             </div>
           )}
         </Link>
@@ -53,7 +53,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={closeMobile}
-          className="md:hidden p-2 -mr-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+          className="md:hidden p-2 -mr-1 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-gray-100 transition-colors"
           aria-label="Close menu"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -64,14 +64,14 @@ export function Sidebar() {
       </div>
 
       {/* Divider */}
-      <div className={`h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent ${collapsed ? 'mx-3' : 'mx-5'}`} />
+      <div className={`h-px bg-[var(--color-border-subtle)] ${collapsed ? 'mx-3' : 'mx-5'}`} />
 
       {/* Navigation */}
-      <nav className="relative flex-1 px-2 pt-5 pb-3 space-y-6 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-white/5">
+      <nav className="relative flex-1 px-2 pt-5 pb-3 space-y-6 overflow-y-auto overflow-x-hidden">
         {/* Dashboard */}
         <div>
           {!collapsed && (
-            <p className="px-3 mb-2.5 text-[10px] font-semibold text-white/25 uppercase tracking-[0.18em]">
+            <p className="px-3 mb-2.5 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.18em]">
               Dashboard
             </p>
           )}
@@ -87,7 +87,7 @@ export function Sidebar() {
         {/* Automations */}
         <div>
           {!collapsed && (
-            <p className="px-3 mb-2.5 text-[10px] font-semibold text-white/25 uppercase tracking-[0.18em]">
+            <p className="px-3 mb-2.5 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.18em]">
               Automations
             </p>
           )}
@@ -115,10 +115,10 @@ export function Sidebar() {
         <button
           type="button"
           onClick={toggle}
-          className="flex w-full items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-white/[0.04] transition-all duration-200 text-white/40 hover:text-white/70"
+          className="flex w-full items-center gap-2.5 px-3 py-2.5 rounded-xl hover:bg-gray-100 transition-all duration-200 text-[var(--color-text-faint)] hover:text-[var(--color-text-secondary)]"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          <span className="flex-shrink-0 text-white/30">
+          <span className="flex-shrink-0 text-[var(--color-text-faint)]">
             {collapsed ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
@@ -135,15 +135,15 @@ export function Sidebar() {
 
       {/* User profile */}
       <div className="relative px-2 pb-5 pt-2">
-        <div className={`mb-3 h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent ${collapsed ? 'mx-0' : 'mx-2'}`} />
-        <div className={`flex items-center rounded-xl hover:bg-white/[0.04] transition-all duration-200 cursor-pointer group ${collapsed ? 'justify-center p-2' : 'gap-2.5 px-3 py-2.5'}`}>
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-white/[0.06] flex items-center justify-center group-hover:border-white/[0.1] transition-colors duration-200 flex-shrink-0">
-            <span className="text-[11px] font-semibold text-blue-400/80">A</span>
+        <div className={`mb-3 h-px bg-[var(--color-border-subtle)] ${collapsed ? 'mx-0' : 'mx-2'}`} />
+        <div className={`flex items-center rounded-xl hover:bg-gray-100 transition-all duration-200 cursor-pointer group ${collapsed ? 'justify-center p-2' : 'gap-2.5 px-3 py-2.5'}`}>
+          <div className="w-8 h-8 rounded-lg bg-[var(--color-accent-light)] border border-[#71b1ff]/40 flex items-center justify-center group-hover:border-[#50a1fe]/50 transition-colors duration-200 flex-shrink-0">
+            <span className="text-[11px] font-semibold text-[var(--color-brand-orange)]">A</span>
           </div>
           {!collapsed && (
             <div className="leading-tight min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-white/70 truncate group-hover:text-white/85 transition-colors duration-200">Admin</div>
-              <div className="text-[10px] text-white/25 truncate">All In IT Solutions</div>
+              <div className="text-[12px] font-medium text-[var(--color-text-secondary)] truncate group-hover:text-[var(--color-text-primary)] transition-colors duration-200">Admin</div>
+              <div className="text-[10px] text-[var(--color-text-faint)] truncate">All In IT Solutions</div>
             </div>
           )}
         </div>
