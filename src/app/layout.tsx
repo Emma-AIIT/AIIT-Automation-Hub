@@ -2,10 +2,41 @@ import "@/styles/globals.css";
 import { type Metadata } from "next";
 import { TRPCReactProvider } from "@/trpc/react";
 
+const siteUrl =
+  process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "https://aiit-automation-hub.vercel.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "AIIT Automation Hub",
   description: "All In IT Solutions — Automation Control Panel",
-  icons: [{ rel: "icon", url: "/favicon.ico" }],
+  icons: [
+    { rel: "icon", url: "/favicon.png", type: "image/png" },
+    { rel: "icon", url: "/favicon.ico", sizes: "any" },
+  ],
+  openGraph: {
+    title: "AIIT Automation Hub",
+    description: "All In IT Solutions — Automation Control Panel",
+    url: siteUrl,
+    siteName: "AIIT Automation Hub",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "AIIT Automation Hub - All In IT Solutions",
+      },
+    ],
+    locale: "en_AU",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AIIT Automation Hub",
+    description: "All In IT Solutions — Automation Control Panel",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function RootLayout({
