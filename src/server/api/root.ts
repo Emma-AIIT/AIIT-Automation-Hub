@@ -3,6 +3,9 @@ import { clientsRouter } from "~/server/api/routers/clients";
 import { webhooksRouter } from "~/server/api/routers/webhooks";
 import { syncRouter } from "~/server/api/routers/sync";
 import { quotePipelineRouter } from "~/server/api/routers/quotePipeline";
+import { statsRouter } from "~/server/api/routers/stats";
+import { vapiRouter } from "~/server/api/routers/vapi";
+import { ticketsRouter } from "~/server/api/routers/tickets";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 
 /**
@@ -16,6 +19,9 @@ export const appRouter = createTRPCRouter({
   webhooks: webhooksRouter,
   sync: syncRouter,
   quotePipeline: quotePipelineRouter,
+  stats: statsRouter,
+  vapi: vapiRouter,
+  tickets: ticketsRouter,
 });
 
 // export type definition of API

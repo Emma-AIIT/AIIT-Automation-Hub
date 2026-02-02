@@ -3,6 +3,7 @@
 import { type FC, useState, useMemo, useRef, useEffect } from 'react';
 import { type Client } from '@/types/database';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { AvatarInitials } from '@/components/shared/AvatarInitials';
 import { formatDistanceToNow } from 'date-fns';
 
 interface ClientTableProps {
@@ -438,9 +439,7 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
                   >
                     <td className="px-4 lg:px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[var(--color-bg-elevated)] to-[var(--color-bg-card)] border border-[var(--color-border-default)] flex items-center justify-center text-xs font-medium text-[var(--color-text-muted)] group-hover:border-[var(--color-border-strong)] transition-colors">
-                          {client.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                        </div>
+                        <AvatarInitials name={client.name} className="group-hover:border-[var(--color-border-strong)] transition-colors" />
                         <div>
                           <div className="text-sm font-medium text-[var(--color-text-primary)] group-hover:text-[var(--color-text-primary)] transition-colors">
                             {client.name}
@@ -581,9 +580,7 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
               {/* Header Row */}
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-[var(--color-bg-elevated)] to-[var(--color-bg-card)] border border-[var(--color-border-default)] flex items-center justify-center text-sm font-medium text-[var(--color-text-muted)]">
-                    {client.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                  </div>
+                  <AvatarInitials name={client.name} className="w-12 h-12 rounded-xl text-sm" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
                       {client.name}

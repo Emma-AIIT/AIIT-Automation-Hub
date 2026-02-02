@@ -6,22 +6,44 @@
 }
 
 :root {
-  --color-bg-primary: #f9fafb;
-  --color-bg-secondary: #f3f4f6;
+  /* Background layers */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f9fa;
   --color-bg-card: #ffffff;
-  --color-bg-elevated: #f9fafb;
-  --color-bg-hover: #f3f4f6;
-  --color-border-subtle: #e5e7eb;
-  --color-border-default: #d1d5db;
-  --color-border-strong: #9ca3af;
-  --color-text-primary: #111827;
-  --color-text-secondary: #374151;
-  --color-text-muted: #6b7280;
-  --color-text-faint: #9ca3af;
+  --color-bg-elevated: #fafbfc;
+  --color-bg-hover: #f1f3f5;
+
+  /* AIIT Brand Colors (accent: blue) */
+  --color-brand-navy: #1a2332;
+  --color-brand-orange: #50a1fe;
+  --color-brand-orange-light: #71b1ff;
+  /* Alias for blue accent - same values, clearer name */
+  --color-brand-accent: #50a1fe;
+  --color-brand-accent-light: #71b1ff;
+  --color-accent-light: #e9ebfe;
+
+  /* Borders - subtle for OperatorOS aesthetic */
+  --color-border-subtle: #e9ecef;
+  --color-border-default: #dee2e6;
+  --color-border-strong: #adb5bd;
+
+  /* Text */
+  --color-text-primary: #1a2332;
+  --color-text-secondary: #495057;
+  --color-text-muted: #6c757d;
+  --color-text-faint: #adb5bd;
+
+  /* Inputs */
   --color-input-bg: #ffffff;
-  --color-shimmer: rgba(0, 0, 0, 0.03);
-  --color-backdrop: rgba(0, 0, 0, 0.4);
-  --color-accent-primary: #2563eb;
+  --color-input-border: #dee2e6;
+  --color-input-focus: #50a1fe;
+
+  /* Accents (blue) */
+  --color-accent-primary: #50a1fe;
+  --color-accent-hover: #71b1ff;
+  --color-shimmer: rgba(80, 161, 254, 0.05);
+  --color-accent-shadow: rgba(80, 161, 254, 0.25);
+  --color-backdrop: rgba(26, 35, 50, 0.4);
 }
 
 html {
@@ -31,12 +53,12 @@ html {
 }
 
 ::selection {
-  background: rgba(37, 99, 235, 0.2);
-  color: #111827;
+  background: rgba(80, 161, 254, 0.2);
+  color: #1a2332;
 }
 
 :focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.4);
+  outline: 2px solid rgba(80, 161, 254, 0.5);
   outline-offset: 2px;
 }
 
@@ -50,17 +72,17 @@ html {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: #dee2e6;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #adb5bd;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #d1d5db transparent;
+  scrollbar-color: #dee2e6 transparent;
 }
 
 button:active:not(:disabled) {

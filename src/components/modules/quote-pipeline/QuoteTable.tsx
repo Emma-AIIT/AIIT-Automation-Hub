@@ -38,8 +38,73 @@ const TRIGGER_PILL_CLASS: Record<string, string> = {
   Converted: 'bg-blue-100 text-blue-800 border-blue-200',
   '1 Week Reminder Sent': 'bg-violet-100 text-violet-800 border-violet-200',
   '1 Month Reminder Sent': 'bg-cyan-100 text-cyan-800 border-cyan-200',
-  '2 Month Reminder Sent': 'bg-orange-100 text-orange-800 border-orange-200',
+  '2 Month Reminder Sent': 'bg-sky-100 text-sky-800 border-sky-200',
 };
+
+type SortColumn = 'date' | 'contactName' | 'businessName';
+type SortDir = 'asc' | 'desc';
+
+/** Parse DD-MM-YYYY to timestamp for sorting */
+function parseQuoteDate(dateStr: string): number {
+  const parts = dateStr.trim().split(/[-/]/);
+  if (parts.length !== 3) return 0;
+  const [d, m, y] = parts.map((p) => parseInt(p, 10));
+  if (Number.isNaN(d) || Number.isNaN(m) || Number.isNaN(y)) return 0;
+  return new Date(y, m - 1, d).getTime();
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  currentSortBy,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortColumn;
+  currentSortBy: SortColumn | null;
+  sortDir: SortDir;
+  onSort: (key: SortColumn) => void;
+}) {
+  const isActive = currentSortBy === sortKey;
+  return (
+    <th
+      className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em] cursor-pointer select-none hover:text-[var(--color-text-muted)] transition-colors"
+      onClick={(e) => {
+        e.stopPropagation();
+        onSort(sortKey);
+      }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSort(sortKey);
+        }
+      }}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="inline-flex flex-col -space-y-1" aria-hidden>
+          <svg
+            className={`h-3 w-3 ${isActive && sortDir === 'asc' ? 'text-blue-600 opacity-100' : 'opacity-40'}`}
+            fill="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path d="M7 14l5-5 5 5H7z" />
+          </svg>
+          <svg
+            className={`h-3 w-3 -mt-0.5 ${isActive && sortDir === 'desc' ? 'text-blue-600 opacity-100' : 'opacity-40'}`}
+            fill="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path d="M7 10l5 5 5-5H7z" />
+          </svg>
+        </span>
+      </span>
+    </th>
+  );
+}
 
 export function QuoteTable() {
   const [search, setSearch] = useState('');
@@ -48,6 +113,8 @@ export function QuoteTable() {
   const [period, setPeriod] = useState('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [sortBy, setSortBy] = useState<SortColumn | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   /** Local overrides only when useMockData - edits are not persisted */
   const [statusOverrides, setStatusOverrides] = useState<Record<number, Quote['status']>>({});
@@ -86,8 +153,35 @@ export function QuoteTable() {
     return results;
   }, [data?.quotes, search, status, source]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const sorted = useMemo(() => {
+    if (!sortBy) return filtered;
+    const copy = [...filtered];
+    copy.sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'date') {
+        cmp = parseQuoteDate(a.date) - parseQuoteDate(b.date);
+      } else if (sortBy === 'businessName') {
+        cmp = (a.businessName ?? '').localeCompare(b.businessName ?? '', undefined, { sensitivity: 'base' });
+      } else if (sortBy === 'contactName') {
+        cmp = (a.contactName ?? '').localeCompare(b.contactName ?? '', undefined, { sensitivity: 'base' });
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }, [filtered, sortBy, sortDir]);
+
+  const handleSort = (key: SortColumn) => {
+    if (sortBy === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const paginated = sorted.slice((page - 1) * pageSize, page * pageSize);
 
   // Reset to page 1 when page size changes or when current page exceeds total
   useEffect(() => {
@@ -203,10 +297,28 @@ export function QuoteTable() {
               <table className="w-full min-w-[700px]">
                 <thead>
                   <tr className="border-b border-[var(--color-border-subtle)]">
-                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Business Name</th>
-                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Contact</th>
+                    <SortableTh
+                      label="Business Name"
+                      sortKey="businessName"
+                      currentSortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <SortableTh
+                      label="Contact"
+                      sortKey="contactName"
+                      currentSortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
                     <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">File</th>
-                    <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Date</th>
+                    <SortableTh
+                      label="Date"
+                      sortKey="date"
+                      currentSortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
                     <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Trigger</th>
                     <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Source</th>
                     <th className="text-left px-4 lg:px-6 py-4 text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Status</th>
@@ -246,7 +358,7 @@ export function QuoteTable() {
             <div className="flex flex-col gap-3 px-3 sm:px-4 lg:px-6 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/50 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-col xs:flex-row flex-wrap items-start xs:items-center gap-2 sm:gap-4">
                 <span className="text-xs sm:text-sm text-[var(--color-text-muted)]">
-                  Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of {filtered.length}
+                  Showing {sorted.length === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, sorted.length)} of {sorted.length}
                 </span>
                 <div className="flex items-center gap-2">
                   <label htmlFor="page-size" className="text-xs sm:text-sm text-[var(--color-text-muted)]">

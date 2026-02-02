@@ -6,7 +6,7 @@ import { useSidebar } from './SidebarContext';
 interface SidebarNavItemProps {
   href: string;
   label: string;
-  icon: 'dollar' | 'document' | 'users' | 'settings' | 'home';
+  icon: 'dollar' | 'document' | 'users' | 'settings' | 'home' | 'phone' | 'ticket';
   active?: boolean;
   badge?: { count: number; color: 'red' | 'blue' };
   disabled?: boolean;
@@ -48,6 +48,21 @@ const icons: Record<SidebarNavItemProps['icon'], React.ReactNode> = {
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   ),
+  phone: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  ),
+  ticket: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 5v2" />
+      <path d="M15 11v2" />
+      <path d="M15 17v2" />
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M3 15h18" />
+    </svg>
+  ),
 };
 
 export function SidebarNavItem({
@@ -68,17 +83,17 @@ export function SidebarNavItem({
         relative flex items-center gap-2.5 rounded-xl text-[13px] font-medium transition-all duration-200
         ${collapsed ? 'justify-center px-0 py-2.5 w-full' : 'px-3 py-2'}
         ${active
-          ? 'bg-white/[0.07] text-white/95 shadow-sm shadow-black/10'
-          : 'text-white/40 hover:bg-white/[0.04] hover:text-white/65'
+          ? 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)]'
+          : 'text-[var(--color-text-muted)] hover:bg-gray-100 hover:text-[var(--color-text-secondary)]'
         }
         ${disabled ? 'opacity-30 pointer-events-none' : 'cursor-pointer'}
       `}
     >
       {/* Active indicator bar */}
       {active && (
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-blue-400 shadow-sm shadow-blue-400/40" />
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-[var(--color-brand-orange)] shadow-sm shadow-[var(--color-accent-shadow)]" />
       )}
-      <span className={`flex-shrink-0 transition-colors duration-200 ${active ? 'text-blue-400' : 'text-white/30'}`}>
+      <span className={`flex-shrink-0 transition-colors duration-200 ${active ? 'text-[var(--color-brand-orange)]' : 'text-[var(--color-text-faint)]'}`}>
         {icons[icon]}
       </span>
       {!collapsed && (
@@ -88,14 +103,14 @@ export function SidebarNavItem({
             <span
               className={`
                 min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-semibold flex items-center justify-center
-                ${badge.color === 'red' ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400'}
+                ${badge.color === 'red' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}
               `}
             >
               {badge.count}
             </span>
           )}
           {comingSoon && (
-            <span className="text-[10px] text-white/20 font-medium">Soon</span>
+            <span className="text-[10px] text-[var(--color-text-faint)] font-medium">Soon</span>
           )}
         </>
       )}

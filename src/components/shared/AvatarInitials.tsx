@@ -5,7 +5,7 @@ const COLORS = [
   'bg-rose-100 text-rose-700',
   'bg-purple-100 text-purple-700',
   'bg-cyan-100 text-cyan-700',
-  'bg-orange-100 text-orange-700',
+  'bg-sky-100 text-sky-700',
   'bg-indigo-100 text-indigo-700',
 ];
 
