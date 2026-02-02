@@ -11,10 +11,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "AIIT Automation Hub",
   description: "All In IT Solutions — Automation Control Panel",
-  icons: [
-    { rel: "icon", url: "/favicon.png", type: "image/png" },
-    { rel: "icon", url: "/favicon.ico", sizes: "any" },
-  ],
+  icons: "/favicon.png",
   openGraph: {
     title: "AIIT Automation Hub",
     description: "All In IT Solutions — Automation Control Panel",
