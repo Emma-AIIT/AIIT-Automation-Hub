@@ -244,13 +244,12 @@ export function QuoteTable() {
 
             {/* Pagination */}
             <div className="flex flex-col gap-3 px-3 sm:px-4 lg:px-6 py-3 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/50 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+              <div className="flex flex-col xs:flex-row flex-wrap items-start xs:items-center gap-2 sm:gap-4">
                 <span className="text-xs sm:text-sm text-[var(--color-text-muted)]">
-                  Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1} to{' '}
-                  {Math.min(page * pageSize, filtered.length)} of {filtered.length} quotes
+                  Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of {filtered.length}
                 </span>
                 <div className="flex items-center gap-2">
-                  <label htmlFor="page-size" className="text-sm text-[var(--color-text-muted)]">
+                  <label htmlFor="page-size" className="text-xs sm:text-sm text-[var(--color-text-muted)]">
                     Per page:
                   </label>
                   <select
@@ -270,7 +269,7 @@ export function QuoteTable() {
                   </select>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center justify-center sm:justify-end gap-1 overflow-x-auto">
+              <div className="flex flex-wrap items-center justify-center sm:justify-end gap-1 overflow-x-auto pb-1 -mb-1 min-w-0">
                 <button
                   onClick={() => setPage(1)}
                   disabled={page === 1}
@@ -385,40 +384,38 @@ function QuoteCard({
         }
       }}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <AvatarInitials name={quote.businessName} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-[var(--color-text-primary)] truncate">{quote.businessName}</div>
-              <div className="text-xs text-[var(--color-text-muted)] truncate">{quote.contactName ?? quote.email ?? '—'}</div>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start gap-2 min-w-0">
+          <AvatarInitials name={quote.businessName} className="flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-[var(--color-text-primary)] truncate">{quote.businessName}</div>
+            <div className="text-xs text-[var(--color-text-muted)] truncate">{quote.contactName ?? quote.email ?? '—'}</div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-600 border border-blue-500/20">
+                {quote.source}
+              </span>
+              <span className="text-[10px] text-[var(--color-text-muted)]">{quote.date}</span>
+              {quote.file && (
+                <a
+                  href={quote.file}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-blue-600 hover:underline text-[10px]"
+                >
+                  Link
+                </a>
+              )}
             </div>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-600 border border-blue-500/20">
-              {quote.source}
-            </span>
-            <span className="text-[10px] text-[var(--color-text-muted)]">{quote.date}</span>
-            {quote.file && (
-              <a
-                href={quote.file}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="text-blue-600 hover:underline text-[10px]"
-              >
-                Link
-              </a>
-            )}
-          </div>
         </div>
-        <div className="flex flex-col items-end gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-col sm:flex-row gap-2" onClick={(e) => e.stopPropagation()}>
           <select
             value={displayTrigger ?? ''}
             onChange={(e) => onTriggerChange(e.target.value || null)}
             disabled={isUpdating}
-            className={`w-full max-w-[130px] px-2 py-1 rounded-full border text-[10px] font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right disabled:opacity-60 ${triggerPillClass || 'bg-gray-50 text-gray-600 border-gray-200'}`}
-            style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 6px center' }}
+            className={`w-full sm:max-w-[140px] px-2 py-1.5 rounded-full border text-[10px] font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat disabled:opacity-60 ${triggerPillClass || 'bg-gray-50 text-gray-600 border-gray-200'}`}
+            style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 8px center' }}
           >
             <option value="">—</option>
             {TRIGGER_OPTIONS.map((opt) => (
@@ -429,8 +426,8 @@ function QuoteCard({
             value={STATUS_OPTIONS.includes(displayStatus) ? displayStatus : STATUS_OPTIONS[0]}
             onChange={(e) => onStatusChange(e.target.value as Quote['status'])}
             disabled={isUpdating}
-            className={`w-full max-w-[100px] px-2 py-1 rounded-full border text-[10px] font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat bg-right disabled:opacity-60 ${statusPillClass}`}
-            style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 6px center' }}
+            className={`w-full sm:max-w-[120px] px-2 py-1.5 rounded-full border text-[10px] font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer appearance-none bg-no-repeat disabled:opacity-60 ${statusPillClass}`}
+            style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundPosition: 'right 8px center' }}
           >
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>

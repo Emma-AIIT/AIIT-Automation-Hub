@@ -17,7 +17,7 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-export function AvatarInitials({ name }: { name: string }) {
+export function AvatarInitials({ name, className = '' }: { name: string; className?: string }) {
   const parts = name.trim().split(/\s+/);
   const initials = parts.length >= 2
     ? (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
@@ -26,7 +26,7 @@ export function AvatarInitials({ name }: { name: string }) {
   const colorClass = COLORS[hashString(name) % COLORS.length]!;
 
   return (
-    <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-semibold ${colorClass}`}>
+    <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-semibold flex-shrink-0 ${colorClass} ${className}`}>
       {initials}
     </div>
   );

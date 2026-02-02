@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSidebar } from './SidebarContext';
 
 interface SidebarNavItemProps {
   href: string;
@@ -59,6 +60,7 @@ export function SidebarNavItem({
   comingSoon = false,
   collapsed = false,
 }: SidebarNavItemProps) {
+  const { closeMobile } = useSidebar();
   const content = (
     <div
       title={collapsed ? label : undefined}
@@ -102,5 +104,9 @@ export function SidebarNavItem({
 
   if (disabled) return content;
 
-  return <Link href={href}>{content}</Link>;
+  return (
+    <Link href={href} onClick={closeMobile}>
+      {content}
+    </Link>
+  );
 }

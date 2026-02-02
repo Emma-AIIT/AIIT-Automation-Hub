@@ -7,15 +7,25 @@ const SIDEBAR_COLLAPSED_KEY = 'aiit-sidebar-collapsed';
 interface SidebarContextType {
   collapsed: boolean;
   toggle: () => void;
+  mobileOpen: boolean;
+  toggleMobile: () => void;
+  closeMobile: () => void;
 }
 
 function noop() {
   // default context; real toggle is provided by SidebarProvider
 }
-const SidebarContext = createContext<SidebarContextType>({ collapsed: false, toggle: noop });
+const SidebarContext = createContext<SidebarContextType>({
+  collapsed: false,
+  toggle: noop,
+  mobileOpen: false,
+  toggleMobile: noop,
+  closeMobile: noop,
+});
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -44,8 +54,11 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const toggleMobile = () => setMobileOpen((o) => !o);
+  const closeMobile = () => setMobileOpen(false);
+
   return (
-    <SidebarContext.Provider value={{ collapsed, toggle }}>
+    <SidebarContext.Provider value={{ collapsed, toggle, mobileOpen, toggleMobile, closeMobile }}>
       {children}
     </SidebarContext.Provider>
   );
