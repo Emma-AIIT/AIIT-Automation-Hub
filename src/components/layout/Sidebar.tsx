@@ -1,14 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { SIDEBAR_MODULES } from '@/lib/mock-data/quotes';
 import { SidebarNavItem } from './SidebarNavItem';
 import { useSidebar } from './SidebarContext';
+import { createClient } from '@/lib/supabase/client';
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar();
+
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
 
   return (
     <>
@@ -145,6 +154,21 @@ export function Sidebar() {
               <div className="text-[12px] font-medium text-[var(--color-text-secondary)] truncate group-hover:text-[var(--color-text-primary)] transition-colors duration-200">Admin</div>
               <div className="text-[10px] text-[var(--color-text-faint)] truncate">All In IT Solutions</div>
             </div>
+          )}
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="p-1.5 rounded-lg text-[var(--color-text-faint)] hover:text-rose-500 hover:bg-rose-50 transition-colors"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
           )}
         </div>
       </div>

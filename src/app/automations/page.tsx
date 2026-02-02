@@ -7,6 +7,7 @@ import { StatsCard } from '@/components/dashboard/StatsCard';
 import { ActivityTimeline, type ActivityItem } from '@/components/dashboard/ActivityTimeline';
 import { AgentStatusCards, type AgentStatusItem } from '@/components/dashboard/AgentStatusCards';
 import { ModuleCard } from '@/components/dashboard/ModuleCard';
+import { VapiMetricsChart } from '@/components/dashboard/VapiMetricsChart';
 import { AGENT_CONFIGS } from '@/config/voice-agents';
 import type { VapiCall } from '@/types/vapi';
 import type { SupportTicket } from '@/types/tickets';
@@ -37,7 +38,7 @@ interface ActivityWithSort {
   sortKey: number;
 }
 
-const ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 function buildActivities(
   calls: VapiCall[],
@@ -114,6 +115,7 @@ export default function AutomationsDashboardPage() {
   );
   const { data: tickets = [] } = api.tickets.getAll.useQuery({ limit: 10 }, { retry: false });
   const { data: ticketStats } = api.tickets.getStats.useQuery();
+  const { data: vapiMetrics } = api.vapi.getDailyMetrics.useQuery({ days: 30 }, { retry: false });
 
   const quoteCount = quoteData?.quotes?.length ?? 0;
   const wonCount = quoteData?.quotes?.filter((q) => q.status === 'Won').length ?? 0;
@@ -147,8 +149,11 @@ export default function AutomationsDashboardPage() {
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(amount);
 
+  const formatCost = (amount: number) =>
+    new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+
   return (
-    <div className="p-6 md:p-8 space-y-8 max-w-7xl">
+    <div className="mx-auto w-full max-w-[1400px] p-6 md:p-8 lg:p-10 space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -192,18 +197,25 @@ export default function AutomationsDashboardPage() {
           }
         />
         <StatsCard
-          title="Won Quotes"
-          value={wonCount}
-          subtitle={`${quoteCount} total quotes`}
+          title="VAPI Costs"
+          value={vapiMetrics ? formatCost(vapiMetrics.totalCost) : '...'}
+          subtitle={vapiMetrics ? `${vapiMetrics.totalCalls} calls (30d)` : 'Last 30 days'}
           icon={
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
             </svg>
           }
         />
       </div>
 
-      {/* Main Grid - Activity Timeline + Quick Links */}
+      {/* VAPI Metrics Charts */}
+      <VapiMetricsChart
+        metrics={vapiMetrics?.metrics ?? []}
+        totalCalls={vapiMetrics?.totalCalls ?? 0}
+        totalCost={vapiMetrics?.totalCost ?? 0}
+      />
+
+      {/* Main Grid - Activity Timeline + Agent Status */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:items-stretch">
         <div className="lg:col-span-2 h-full min-h-0">
           <ActivityTimeline activities={activities} isLoading={callsLoading} />

@@ -26,7 +26,59 @@ async function vapiRequest<T>(endpoint: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+interface DailyMetric {
+  date: string;
+  calls: number;
+  cost: number;
+}
+
 export const vapiRouter = createTRPCRouter({
+  getDailyMetrics: publicProcedure
+    .input(z.object({
+      days: z.number().default(30),
+    }))
+    .query(async ({ input }) => {
+      const now = new Date();
+      const dateFrom = new Date(now.getTime() - input.days * 24 * 60 * 60 * 1000);
+      const params = new URLSearchParams();
+      params.set('createdAtGt', dateFrom.toISOString());
+      params.set('createdAtLt', now.toISOString());
+      params.set('limit', '1000');
+
+      const calls = await vapiRequest<VapiCall[]>(`/call?${params.toString()}`);
+
+      const dailyMap = new Map<string, { calls: number; cost: number }>();
+
+      // Initialize all days
+      for (let i = 0; i < input.days; i++) {
+        const d = new Date(dateFrom.getTime() + i * 24 * 60 * 60 * 1000);
+        const key = d.toISOString().split('T')[0]!;
+        dailyMap.set(key, { calls: 0, cost: 0 });
+      }
+
+      // Aggregate calls by day
+      for (const call of calls) {
+        if (!call.startedAt) continue;
+        const d = new Date(call.startedAt);
+        if (Number.isNaN(d.getTime())) continue;
+        const key = d.toISOString().split('T')[0]!;
+        const entry = dailyMap.get(key);
+        if (entry) {
+          entry.calls += 1;
+          entry.cost += call.cost ?? 0;
+        }
+      }
+
+      const metrics: DailyMetric[] = Array.from(dailyMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, data]) => ({ date, calls: data.calls, cost: data.cost }));
+
+      const totalCalls = calls.length;
+      const totalCost = calls.reduce((sum, c) => sum + (c.cost ?? 0), 0);
+
+      return { metrics, totalCalls, totalCost };
+    }),
+
   getAssistants: publicProcedure.query(async () => {
     const assistants = await vapiRequest<VapiAssistant[]>('/assistant');
     return assistants;
