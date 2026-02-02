@@ -61,11 +61,13 @@ export const vapiRouter = createTRPCRouter({
     .input(z.object({
       assistantId: z.string().optional(),
       dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
     }))
     .query(async ({ input }) => {
       const params = new URLSearchParams();
       if (input.assistantId) params.set('assistantId', input.assistantId);
       if (input.dateFrom) params.set('createdAtGt', input.dateFrom);
+      if (input.dateTo) params.set('createdAtLt', input.dateTo);
       params.set('limit', '1000');
 
       const calls = await vapiRequest<VapiCall[]>(`/call?${params.toString()}`);
