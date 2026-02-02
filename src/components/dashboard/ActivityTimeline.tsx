@@ -2,22 +2,13 @@
 
 import { type FC } from 'react';
 
-interface ActivityItem {
+export interface ActivityItem {
   id: string;
   type: 'call' | 'payment' | 'quote' | 'ticket' | 'sync';
   title: string;
   description: string;
   time: string;
 }
-
-const MOCK_ACTIVITY: ActivityItem[] = [
-  { id: '1', type: 'call', title: 'Inbound call received', description: 'EA Assistant handled inquiry from +61 412 345 678', time: '5 min ago' },
-  { id: '2', type: 'payment', title: 'Payment received', description: 'Acme Corp paid $2,500 towards outstanding balance', time: '1 hour ago' },
-  { id: '3', type: 'quote', title: 'New quote created', description: 'OBM Demolition - $35,000 website project', time: '2 hours ago' },
-  { id: '4', type: 'ticket', title: 'Support ticket opened', description: 'Customer requesting software installation help', time: '3 hours ago' },
-  { id: '5', type: 'sync', title: 'Xero sync completed', description: 'Updated 12 client records from Xero', time: '6 hours ago' },
-  { id: '6', type: 'call', title: 'Outbound call made', description: 'DC Assistant followed up with Grace Care NDIS', time: '8 hours ago' },
-];
 
 const typeConfig: Record<ActivityItem['type'], { icon: React.ReactNode; color: string }> = {
   call: {
@@ -66,30 +57,51 @@ const typeConfig: Record<ActivityItem['type'], { icon: React.ReactNode; color: s
   },
 };
 
-export const ActivityTimeline: FC = () => {
+interface ActivityTimelineProps {
+  activities?: ActivityItem[];
+  isLoading?: boolean;
+}
+
+export const ActivityTimeline: FC<ActivityTimelineProps> = ({ activities = [], isLoading = false }) => {
   return (
-    <div className="bg-white rounded-2xl border border-[var(--color-border-subtle)] p-6">
+    <div className="h-full flex flex-col bg-white rounded-2xl border border-[var(--color-border-subtle)] p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Recent Activity</h2>
         <span className="text-xs text-[var(--color-text-faint)]">Last 24 hours</span>
       </div>
-      <div className="space-y-4">
-        {MOCK_ACTIVITY.map((item) => {
-          const config = typeConfig[item.type];
-          return (
-            <div key={item.id} className="flex items-start gap-3 group">
-              <div className={`flex-shrink-0 w-8 h-8 rounded-lg border flex items-center justify-center ${config.color}`}>
-                {config.icon}
+      {isLoading ? (
+        <div className="space-y-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[var(--color-bg-hover)] animate-pulse" />
+              <div className="flex-1 min-w-0 space-y-2">
+                <div className="h-4 w-32 bg-[var(--color-bg-hover)] rounded animate-pulse" />
+                <div className="h-3 w-full max-w-[200px] bg-[var(--color-bg-hover)] rounded animate-pulse" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-[var(--color-text-primary)]">{item.title}</p>
-                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{item.description}</p>
-              </div>
-              <span className="flex-shrink-0 text-xs text-[var(--color-text-faint)]">{item.time}</span>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      ) : activities.length === 0 ? (
+        <p className="text-sm text-[var(--color-text-muted)] py-4">No recent activity</p>
+      ) : (
+        <div className="space-y-4">
+          {activities.map((item) => {
+            const config = typeConfig[item.type];
+            return (
+              <div key={item.id} className="flex items-start gap-3 group">
+                <div className={`flex-shrink-0 w-8 h-8 rounded-lg border flex items-center justify-center ${config.color}`}>
+                  {config.icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-[var(--color-text-primary)]">{item.title}</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{item.description}</p>
+                </div>
+                <span className="flex-shrink-0 text-xs text-[var(--color-text-faint)]">{item.time}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

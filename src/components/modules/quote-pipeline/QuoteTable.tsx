@@ -48,7 +48,9 @@ type SortDir = 'asc' | 'desc';
 function parseQuoteDate(dateStr: string): number {
   const parts = dateStr.trim().split(/[-/]/);
   if (parts.length !== 3) return 0;
-  const [d, m, y] = parts.map((p) => parseInt(p, 10));
+  const d = parseInt(parts[0] ?? '', 10);
+  const m = parseInt(parts[1] ?? '', 10);
+  const y = parseInt(parts[2] ?? '', 10);
   if (Number.isNaN(d) || Number.isNaN(m) || Number.isNaN(y)) return 0;
   return new Date(y, m - 1, d).getTime();
 }
