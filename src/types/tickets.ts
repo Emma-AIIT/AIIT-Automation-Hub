@@ -3,7 +3,8 @@ export type TicketStatus = 'open' | 'in-progress' | 'resolved';
 export interface SupportTicket {
   id: string;
   caller_name: string;
-  caller_phone: string;
+  caller_phone: string | null;
+  caller_email: string | null;
   caller_business: string | null;
   inquiry: string;
   summary: string | null;

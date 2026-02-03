@@ -1,7 +1,7 @@
 'use client';
 
 import { type FC } from 'react';
-import { formatDistanceToNow } from 'date-fns';
+import { format, differenceInDays } from 'date-fns';
 import type { SupportTicket } from '@/types/tickets';
 
 interface TicketListProps {
@@ -10,10 +10,17 @@ interface TicketListProps {
   onTicketClick: (id: string) => void;
 }
 
+const getOpenAgeBorderColor = (createdAt: string) => {
+  const days = differenceInDays(new Date(), new Date(createdAt));
+  if (days <= 1) return 'border-l-4 border-l-emerald-500';
+  if (days <= 3) return 'border-l-4 border-l-orange-500';
+  return 'border-l-4 border-l-red-500';
+};
+
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'open': return 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)]';
-    case 'in-progress': return 'bg-blue-50 text-blue-700';
+    case 'in-progress': return 'bg-amber-50 text-amber-700';
     case 'resolved': return 'bg-emerald-50 text-emerald-700';
     default: return 'bg-gray-100 text-gray-700';
   }
@@ -42,6 +49,7 @@ export const TicketList: FC<TicketListProps> = ({ tickets, loading, onTicketClic
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Caller</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Business</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Inquiry</th>
+            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Assigned To</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Status</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Actions</th>
           </tr>
@@ -51,10 +59,12 @@ export const TicketList: FC<TicketListProps> = ({ tickets, loading, onTicketClic
             <tr
               key={ticket.id}
               onClick={() => onTicketClick(ticket.id)}
-              className="border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors"
+              className={`border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors ${
+                ticket.status === 'open' ? getOpenAgeBorderColor(ticket.created_at) : ''
+              }`}
             >
               <td className="py-3 px-4 text-sm text-[var(--color-text-primary)]">
-                {formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true })}
+                {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
               </td>
               <td className="py-3 px-4 text-sm font-medium text-[var(--color-text-primary)]">
                 {ticket.caller_name}
@@ -64,6 +74,9 @@ export const TicketList: FC<TicketListProps> = ({ tickets, loading, onTicketClic
               </td>
               <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-xs truncate">
                 {ticket.inquiry}
+              </td>
+              <td className="py-3 px-4 text-sm text-[var(--color-text-muted)]">
+                {ticket.assigned_to ?? '-'}
               </td>
               <td className="py-3 px-4">
                 <span className={`inline-flex px-2 py-1 rounded-md text-xs font-medium ${getStatusColor(ticket.status)}`}>
