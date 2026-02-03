@@ -3,6 +3,25 @@ import { createTRPCRouter, publicProcedure } from "../trpc";
 import { createClient } from "@/lib/supabase/server";
 
 export const clientsRouter = createTRPCRouter({
+  setChase: publicProcedure
+    .input(
+      z.object({
+        clientId: z.string().uuid(),
+        chase: z.enum(['to_chase', 'do_not_chase']),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('clients')
+        .update({ chase: input.chase, updated_at: new Date().toISOString() })
+        .eq('id', input.clientId)
+        .select('id, chase')
+        .single();
+      if (error) throw error;
+      return data;
+    }),
+
   getAll: publicProcedure
     .input(
       z.object({

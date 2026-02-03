@@ -2,6 +2,7 @@
 
 import { type FC, useState, useMemo, useRef, useEffect } from 'react';
 import { type Client } from '@/types/database';
+import { api } from '@/trpc/react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { AvatarInitials } from '@/components/shared/AvatarInitials';
 import { formatDistanceToNow } from 'date-fns';
@@ -29,11 +30,44 @@ const CALL_OUTCOME_ORDER: Record<string, number> = {
   'No Answer': 2,
 };
 
+/** +61 followed by 9 digits = 12 chars total, e.g. +61493324958 */
+const PHONE_ABLE_TO_CALL_REGEX = /^\+61[0-9]{9}$/;
+
+function isAbleToCall(client: Client): boolean {
+  const hasEmail = Boolean(client.email?.trim());
+  const hasName = Boolean(client.name?.trim());
+  const hasBusinessName = Boolean(client.company?.trim());
+  const hasValidPhone = Boolean(client.phone?.trim() && PHONE_ABLE_TO_CALL_REGEX.test(client.phone.trim()));
+  const amountOwing = client.current_balance > 0;
+  return hasEmail && hasName && hasBusinessName && hasValidPhone && amountOwing;
+}
+
+/** Client is "to chase" from DB (fallback for old rows without column) */
+function isToChase(client: Client): boolean {
+  const chase = (client as { chase?: 'to_chase' | 'do_not_chase' }).chase ?? 'to_chase';
+  return chase === 'to_chase';
+}
+
+const ROW_EXIT_MS = 220;
+
 export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) => {
+  const utils = api.useUtils();
+  const [leavingChaseIds, setLeavingChaseIds] = useState<Set<string>>(new Set());
+
+  const setChaseMutation = api.clients.setChase.useMutation({
+    onSuccess: () => {
+      // Don't invalidate – cache was updated optimistically; refetch would cause flash
+    },
+    onError: () => {
+      void utils.clients.getAll.invalidate();
+    },
+  });
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [balanceFilter, setBalanceFilter] = useState<string>('all');
   const [streakFilter, setStreakFilter] = useState<string>('all');
+  const [ableToCallFilter, setAbleToCallFilter] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [sortField, setSortField] = useState<SortField>('streak_days');
@@ -83,7 +117,10 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
       else if (streakFilter === '8-14') matchesStreak = client.streak_days >= 8 && client.streak_days <= 14;
       else if (streakFilter === '15+') matchesStreak = client.streak_days >= 15;
 
-      return matchesSearch && matchesStatus && matchesBalance && matchesStreak;
+      // Filter by able to call: email, name, business name, valid +61 phone, amount > 0 (includes To chase and Do not chase)
+      const matchesAbleToCall = !ableToCallFilter || isAbleToCall(client);
+
+      return matchesSearch && matchesStatus && matchesBalance && matchesStreak && matchesAbleToCall;
     });
 
     // Sort
@@ -120,7 +157,7 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
     });
 
     return result;
-  }, [clients, searchTerm, statusFilter, balanceFilter, streakFilter, sortField, sortDirection]);
+  }, [clients, searchTerm, statusFilter, balanceFilter, streakFilter, ableToCallFilter, sortField, sortDirection]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredAndSortedClients.length / itemsPerPage);
@@ -159,13 +196,45 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
     setStatusFilter('all');
     setBalanceFilter('all');
     setStreakFilter('all');
+    setAbleToCallFilter(false);
     setCurrentPage(1);
+  };
+
+  const applyChaseToCache = (clientId: string, chase: 'to_chase' | 'do_not_chase') => {
+    utils.clients.getAll.setData({}, (prev) =>
+      prev ? prev.map((c) => (c.id === clientId ? { ...c, chase } : c)) : prev
+    );
+  };
+
+  const toggleChase = (client: Client, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const nextChase = isToChase(client) ? 'do_not_chase' : 'to_chase';
+    const isUncheckingWithFilterOn = nextChase === 'do_not_chase' && ableToCallFilter;
+
+    if (isUncheckingWithFilterOn) {
+      // Animate row out first, then update cache and mutate (no refetch = no flash)
+      setLeavingChaseIds((prev) => new Set(prev).add(client.id));
+      setTimeout(() => {
+        applyChaseToCache(client.id, nextChase);
+        setLeavingChaseIds((prev) => {
+          const next = new Set(prev);
+          next.delete(client.id);
+          return next;
+        });
+        setChaseMutation.mutate({ clientId: client.id, chase: nextChase });
+      }, ROW_EXIT_MS);
+    } else {
+      // Optimistic update immediately, no refetch on success
+      applyChaseToCache(client.id, nextChase);
+      setChaseMutation.mutate({ clientId: client.id, chase: nextChase });
+    }
   };
 
   const activeFilterCount = [
     statusFilter !== 'all',
     balanceFilter !== 'all',
     streakFilter !== 'all',
+    ableToCallFilter,
     searchTerm !== '',
   ].filter(Boolean).length;
 
@@ -264,6 +333,26 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
               </svg>
             </div>
           </div>
+
+          {/* Filter by able to call */}
+          <button
+            type="button"
+            onClick={() => {
+              setAbleToCallFilter((prev) => !prev);
+              setCurrentPage(1);
+            }}
+            className={`flex items-center gap-2 px-4 py-3 rounded-xl border transition-all duration-200 ${
+              ableToCallFilter
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-[var(--color-input-bg)] border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-strong)]'
+            }`}
+            title="Show only clients with email, name, business name, valid +61 phone (12 chars), and amount owing > 0"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
+            <span className="text-sm hidden sm:inline">Filter by able to call</span>
+          </button>
 
           {/* More Filters Button */}
           <div className="relative" ref={filterRef}>
@@ -393,6 +482,17 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
               </button>
             </span>
           )}
+          {ableToCallFilter && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
+              Able to call
+              <button onClick={() => setAbleToCallFilter(false)} className="text-emerald-400/70 hover:text-emerald-400 transition-colors">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -404,6 +504,9 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
           <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--color-border-subtle)]">
+                <th className="px-4 lg:px-6 py-4 text-left w-0">
+                  <span className="text-[10px] font-semibold text-[var(--color-text-faint)] uppercase tracking-[0.15em]">Chase</span>
+                </th>
                 <SortableHeader field="name">Client</SortableHeader>
                 <SortableHeader field="current_balance">Outstanding</SortableHeader>
                 <SortableHeader field="week_change">Week Change</SortableHeader>
@@ -416,6 +519,8 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
             <tbody>
               {paginatedClients.map((client, index) => {
                 const balanceChange = getBalanceChange(client.current_balance, client.previous_balance);
+                const isLeaving = leavingChaseIds.has(client.id);
+                const showAsToChase = isLeaving ? false : isToChase(client);
 
                 return (
                   <tr
@@ -424,9 +529,14 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
                     className={`
                       group border-b border-[var(--color-border-subtle)] last:border-b-0
                       transition-all duration-200 ease-out
-                      ${onClientClick ? 'cursor-pointer hover:bg-[var(--color-bg-hover)]' : ''}
+                      ${isLeaving ? 'opacity-0 scale-[0.98] pointer-events-none' : ''}
+                      ${onClientClick && !isLeaving ? 'cursor-pointer hover:bg-[var(--color-bg-hover)]' : ''}
                     `}
-                    style={{ animationDelay: `${index * 30}ms` }}
+                    style={
+                      isLeaving
+                        ? { marginBottom: 0, transitionDuration: `${ROW_EXIT_MS}ms` }
+                        : { animationDelay: `${index * 30}ms` }
+                    }
                     role={onClientClick ? 'button' : undefined}
                     tabIndex={onClientClick ? 0 : undefined}
                     onKeyDown={(e) => {
@@ -437,6 +547,21 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
                     }}
                     aria-label={onClientClick ? `View details for ${client.name}` : undefined}
                   >
+                    <td className="px-4 lg:px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={showAsToChase}
+                          onChange={(e) => toggleChase(client, e as unknown as React.MouseEvent)}
+                          disabled={setChaseMutation.isPending}
+                          className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-input-bg)] text-emerald-500 focus:ring-emerald-500/30 disabled:opacity-50"
+                          aria-label={showAsToChase ? 'Mark as do not chase' : 'Mark as to chase'}
+                        />
+                        <span className="text-xs text-[var(--color-text-muted)]">
+                          {showAsToChase ? 'To chase' : 'Do not chase'}
+                        </span>
+                      </label>
+                    </td>
                     <td className="px-4 lg:px-6 py-4">
                       <div className="flex items-center gap-3">
                         <AvatarInitials name={client.name} className="group-hover:border-[var(--color-border-strong)] transition-colors" />
@@ -560,6 +685,8 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
         {/* Client Cards */}
         {paginatedClients.map((client, index) => {
           const balanceChange = getBalanceChange(client.current_balance, client.previous_balance);
+          const isLeaving = leavingChaseIds.has(client.id);
+          const showAsToChase = isLeaving ? false : isToChase(client);
 
           return (
             <div
@@ -568,9 +695,14 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
               className={`
                 relative overflow-hidden rounded-2xl border border-[var(--color-border-subtle)] bg-gradient-to-br from-[var(--color-bg-card)] to-[var(--color-bg-secondary)] p-4
                 transition-all duration-200 ease-out
-                ${onClientClick ? 'cursor-pointer active:scale-[0.98]' : ''}
+                ${isLeaving ? 'opacity-0 scale-[0.98] max-h-0 overflow-hidden py-0 border-0 pointer-events-none' : ''}
+                ${onClientClick && !isLeaving ? 'cursor-pointer active:scale-[0.98]' : ''}
               `}
-              style={{ animationDelay: `${index * 50}ms` }}
+              style={
+                isLeaving
+                  ? { transitionDuration: `${ROW_EXIT_MS}ms` }
+                  : { animationDelay: `${index * 50}ms` }
+              }
               role={onClientClick ? 'button' : undefined}
               tabIndex={onClientClick ? 0 : undefined}
             >
@@ -589,6 +721,21 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
                       {client.company ?? client.email}
                     </div>
                   </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showAsToChase}
+                      onChange={(e) => toggleChase(client, e as unknown as React.MouseEvent)}
+                      disabled={setChaseMutation.isPending}
+                      className="w-4 h-4 rounded border-[var(--color-border-default)] bg-[var(--color-input-bg)] text-emerald-500 focus:ring-emerald-500/30 disabled:opacity-50"
+                      aria-label={showAsToChase ? 'Mark as do not chase' : 'Mark as to chase'}
+                    />
+                    <span className="text-xs text-[var(--color-text-muted)]">
+                      {showAsToChase ? 'To chase' : 'Do not chase'}
+                    </span>
+                  </label>
                 </div>
                 <StatusBadge status={client.status} />
               </div>
