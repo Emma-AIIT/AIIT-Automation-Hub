@@ -1,13 +1,24 @@
 'use client';
 
-import { type FC } from 'react';
+import { type FC, memo, useState, useCallback } from 'react';
 import { format, differenceInDays } from 'date-fns';
-import type { SupportTicket } from '@/types/tickets';
+import toast from 'react-hot-toast';
+import { api } from '@/trpc/react';
+import { getWorkerColor } from '@/lib/worker-colors';
+import type { SupportTicket, TicketStatus } from '@/types/tickets';
+
+interface Worker {
+  id: string;
+  name: string;
+}
 
 interface TicketListProps {
   tickets: SupportTicket[];
   loading: boolean;
+  workers: Worker[];
+  statusFilter: TicketStatus | 'all';
   onTicketClick: (id: string) => void;
+  onMutationComplete?: (ticketId: string) => void;
 }
 
 const getOpenAgeBorderColor = (createdAt: string) => {
@@ -26,7 +37,168 @@ const getStatusColor = (status: string) => {
   }
 };
 
-export const TicketList: FC<TicketListProps> = ({ tickets, loading, onTicketClick }) => {
+const STATUS_OPTIONS: TicketStatus[] = ['open', 'in-progress', 'resolved'];
+
+export const TicketList: FC<TicketListProps> = memo(function TicketList({
+  tickets,
+  loading,
+  workers,
+  statusFilter,
+  onTicketClick,
+  onMutationComplete,
+}) {
+  const [openStatusId, setOpenStatusId] = useState<string | null>(null);
+  const utils = api.useUtils();
+
+  const updateStatusMutation = api.tickets.updateStatus.useMutation({
+    onMutate: async ({ id, status }) => {
+      await utils.tickets.getAll.cancel({ status: statusFilter });
+      const prev = utils.tickets.getAll.getData({ status: statusFilter });
+      utils.tickets.getAll.setData({ status: statusFilter }, (old) => {
+        if (!old) return old;
+        if (status !== statusFilter && statusFilter !== 'all') {
+          return old.filter((t) => t.id !== id);
+        }
+        return old.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                status,
+                resolved_at: status === 'resolved' ? new Date().toISOString() : null,
+              }
+            : t
+        );
+      });
+      void utils.tickets.getStats.invalidate();
+      setOpenStatusId(null);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) {
+        utils.tickets.getAll.setData({ status: statusFilter }, ctx.prev);
+      }
+    },
+    onSettled: (_data, _err, vars) => {
+      onMutationComplete?.(vars.id);
+      void utils.tickets.getAll.invalidate({ status: statusFilter });
+      void utils.tickets.getStats.invalidate();
+    },
+  });
+
+  const deleteMutation = api.tickets.delete.useMutation({
+    onMutate: async ({ id }) => {
+      await utils.tickets.getAll.cancel({ status: statusFilter });
+      await utils.tickets.getStats.cancel();
+      const prevTickets = utils.tickets.getAll.getData({ status: statusFilter });
+      const prevStats = utils.tickets.getStats.getData();
+
+      const ticket = prevTickets?.find((t) => t.id === id);
+      const wasOpenUnassigned =
+        ticket?.status === 'open' &&
+        (!ticket.assigned_to || String(ticket.assigned_to).trim() === '');
+
+      utils.tickets.getAll.setData({ status: statusFilter }, (old) =>
+        old ? old.filter((t) => t.id !== id) : old
+      );
+
+      if (prevStats && ticket) {
+        const updates: Record<string, number> = {
+          total: Math.max(0, prevStats.total - 1),
+          open: ticket.status === 'open' ? Math.max(0, prevStats.open - 1) : prevStats.open,
+          inProgress: ticket.status === 'in-progress' ? Math.max(0, prevStats.inProgress - 1) : prevStats.inProgress,
+          resolved: ticket.status === 'resolved' ? Math.max(0, prevStats.resolved - 1) : prevStats.resolved,
+          unassigned: wasOpenUnassigned ? Math.max(0, prevStats.unassigned - 1) : prevStats.unassigned,
+        };
+        utils.tickets.getStats.setData(undefined, { ...prevStats, ...updates });
+      }
+
+      return { prevTickets, prevStats };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.prevTickets) {
+        utils.tickets.getAll.setData({ status: statusFilter }, ctx.prevTickets);
+      }
+      if (ctx?.prevStats) {
+        utils.tickets.getStats.setData(undefined, ctx.prevStats);
+      }
+      toast.error(err.message ?? 'Failed to delete ticket');
+    },
+    onSuccess: () => {
+      void utils.tickets.getAll.invalidate({ status: statusFilter });
+      void utils.tickets.getStats.invalidate();
+    },
+  });
+
+  const assignWorkerMutation = api.tickets.assignWorker.useMutation({
+    onMutate: async ({ id, assigned_to }) => {
+      await utils.tickets.getAll.cancel({ status: statusFilter });
+      await utils.tickets.getStats.cancel();
+      const prevTickets = utils.tickets.getAll.getData({ status: statusFilter });
+      const prevStats = utils.tickets.getStats.getData();
+
+      const ticket = prevTickets?.find((t) => t.id === id);
+      const wasOpenUnassigned =
+        ticket?.status === 'open' &&
+        (!ticket.assigned_to || String(ticket.assigned_to).trim() === '');
+      const isNowUnassigned = !assigned_to || String(assigned_to).trim() === '';
+
+      utils.tickets.getAll.setData({ status: statusFilter }, (old) =>
+        old ? old.map((t) => (t.id === id ? { ...t, assigned_to } : t)) : old
+      );
+
+      if (prevStats && ticket?.status === 'open') {
+        let unassignedDelta = 0;
+        if (wasOpenUnassigned && !isNowUnassigned) unassignedDelta = -1;
+        else if (!wasOpenUnassigned && isNowUnassigned) unassignedDelta = 1;
+        if (unassignedDelta !== 0) {
+          utils.tickets.getStats.setData(undefined, {
+            ...prevStats,
+            unassigned: Math.max(0, prevStats.unassigned + unassignedDelta),
+          });
+        }
+      }
+
+      return { prevTickets, prevStats };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prevTickets) {
+        utils.tickets.getAll.setData({ status: statusFilter }, ctx.prevTickets);
+      }
+      if (ctx?.prevStats) {
+        utils.tickets.getStats.setData(undefined, ctx.prevStats);
+      }
+    },
+    onSettled: (_data, _err, vars) => {
+      onMutationComplete?.(vars.id);
+      void utils.tickets.getAll.invalidate({ status: statusFilter });
+      void utils.tickets.getStats.invalidate();
+    },
+  });
+
+  const handleStatusSelect = useCallback(
+    (ticketId: string, status: TicketStatus) => {
+      updateStatusMutation.mutate({ id: ticketId, status });
+    },
+    [updateStatusMutation]
+  );
+
+  const handleAssignChange = useCallback(
+    (ticketId: string, assignedTo: string | null) => {
+      assignWorkerMutation.mutate({ id: ticketId, assigned_to: assignedTo || null });
+    },
+    [assignWorkerMutation]
+  );
+
+  const handleDelete = useCallback(
+    (e: React.MouseEvent, ticketId: string) => {
+      e.stopPropagation();
+      if (window.confirm('Delete this ticket? This cannot be undone.')) {
+        deleteMutation.mutate({ id: ticketId });
+      }
+    },
+    [deleteMutation]
+  );
+
   if (loading) {
     return <div className="p-8 text-center text-[var(--color-text-muted)]">Loading tickets...</div>;
   }
@@ -75,18 +247,85 @@ export const TicketList: FC<TicketListProps> = ({ tickets, loading, onTicketClic
               <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-xs truncate">
                 {ticket.inquiry}
               </td>
-              <td className="py-3 px-4 text-sm text-[var(--color-text-muted)]">
-                {ticket.assigned_to ?? '-'}
+              <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                {(() => {
+                  const assignedTo = ticket.assigned_to ?? '';
+                  const color = assignedTo ? getWorkerColor(assignedTo) : null;
+                  return (
+                    <select
+                      value={assignedTo}
+                      onChange={(e) => handleAssignChange(ticket.id, e.target.value || null)}
+                      disabled={assignWorkerMutation.isPending}
+                      className={`w-full max-w-[140px] px-2 py-1 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] focus:border-transparent font-medium ${
+                        color ? `border-l-4 border ${color.bg} ${color.text} ${color.border}` : 'border border-[var(--color-border-default)] bg-white'
+                      }`}
+                    >
+                      <option value="">—</option>
+                      {workers.map((w) => (
+                        <option key={w.id} value={w.name}>
+                          {w.name}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
               </td>
-              <td className="py-3 px-4">
-                <span className={`inline-flex px-2 py-1 rounded-md text-xs font-medium ${getStatusColor(ticket.status)}`}>
-                  {ticket.status.replace('-', ' ')}
-                </span>
+              <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setOpenStatusId((id) => (id === ticket.id ? null : ticket.id))}
+                    disabled={updateStatusMutation.isPending}
+                    className={`inline-flex px-2 py-1 rounded-md text-xs font-medium transition-colors hover:opacity-90 ${getStatusColor(ticket.status)}`}
+                  >
+                    {ticket.status.replace('-', ' ')}
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-1 inline">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                  {openStatusId === ticket.id && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        aria-hidden
+                        onClick={() => setOpenStatusId(null)}
+                      />
+                      <div className="absolute left-0 top-full mt-1 z-20 min-w-[140px] rounded-lg border border-[var(--color-border-subtle)] bg-white shadow-lg py-1">
+                        {STATUS_OPTIONS.map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => handleStatusSelect(ticket.id, status)}
+                            className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg ${
+                              ticket.status === status ? 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)] font-medium' : 'text-[var(--color-text-secondary)]'
+                            }`}
+                          >
+                            {status.replace('-', ' ')}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </td>
-              <td className="py-3 px-4">
-                <button className="text-sm text-[var(--color-brand-orange)] hover:underline font-medium">
-                  View
-                </button>
+              <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onTicketClick(ticket.id)}
+                    className="text-sm text-[var(--color-brand-orange)] hover:underline font-medium"
+                  >
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(e, ticket.id)}
+                    disabled={deleteMutation.isPending}
+                    className="text-sm text-red-600 hover:text-red-700 hover:underline font-medium disabled:opacity-50"
+                  >
+                    Delete
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -94,4 +333,4 @@ export const TicketList: FC<TicketListProps> = ({ tickets, loading, onTicketClic
       </table>
     </div>
   );
-};
+});

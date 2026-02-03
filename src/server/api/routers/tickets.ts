@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { env } from "~/env";
 import type { SupportTicket } from "@/types/tickets";
 
 export const ticketsRouter = createTRPCRouter({
@@ -104,6 +106,23 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  delete: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .delete()
+        .eq('id', input.id)
+        .select('id');
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error('Ticket not found or could not be deleted');
+      }
+      return { success: true };
+    }),
+
   assignWorker: publicProcedure
     .input(z.object({
       id: z.string().uuid(),
@@ -122,6 +141,35 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  pullNew: publicProcedure.mutation(async () => {
+    const webhookUrl = env.MAKE_PULL_TICKETS_WEBHOOK_URL;
+
+    if (!webhookUrl) {
+      throw new Error("MAKE_PULL_TICKETS_WEBHOOK_URL is not configured");
+    }
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timestamp: new Date().toISOString() }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Make.com webhook returned status ${response.status}`);
+      }
+
+      return { success: true, message: "Pull started" };
+    } catch (error) {
+      console.error("Error triggering Make.com pull tickets webhook:", error);
+      throw new Error(
+        error instanceof Error
+          ? `Failed to pull tickets: ${error.message}`
+          : "Failed to pull tickets"
+      );
+    }
+  }),
+
   getStats: publicProcedure.query(async () => {
     const supabase = await createClient();
 
@@ -129,11 +177,14 @@ export const ticketsRouter = createTRPCRouter({
       .from('support_tickets')
       .select('*');
 
-    if (!tickets) return { open: 0, inProgress: 0, resolved: 0, total: 0, avgResolutionHours: 0 };
+    if (!tickets) return { open: 0, inProgress: 0, resolved: 0, total: 0, unassigned: 0, avgResolutionHours: 0 };
 
     const open = tickets.filter(t => t.status === 'open').length;
     const inProgress = tickets.filter(t => t.status === 'in-progress').length;
     const resolved = tickets.filter(t => t.status === 'resolved').length;
+    const unassigned = tickets.filter(t =>
+      t.status === 'open' && (!t.assigned_to || String(t.assigned_to).trim() === '')
+    ).length;
 
     const resolvedTickets = tickets.filter(t => t.resolved_at);
     const avgResolutionTime = resolvedTickets.length > 0
@@ -149,6 +200,7 @@ export const ticketsRouter = createTRPCRouter({
       inProgress,
       resolved,
       total: tickets.length,
+      unassigned,
       avgResolutionHours: Math.floor(avgResolutionTime / (1000 * 60 * 60)),
     };
   }),

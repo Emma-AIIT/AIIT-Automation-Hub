@@ -1,6 +1,7 @@
 import "@/styles/globals.css";
 import { type Metadata } from "next";
 import { TRPCReactProvider } from "@/trpc/react";
+import { ToastProvider } from "@/components/ToastProvider";
 
 const siteUrl =
   process.env.VERCEL_URL
@@ -52,6 +53,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <TRPCReactProvider>
           {children}
+          <ToastProvider />
         </TRPCReactProvider>
       </body>
     </html>
