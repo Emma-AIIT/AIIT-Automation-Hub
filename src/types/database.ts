@@ -1,3 +1,5 @@
+export type ChaseStatus = 'to_chase' | 'do_not_chase'
+
 export type Client = {
     id: string
     xero_contact_id: string
@@ -14,6 +16,7 @@ export type Client = {
     last_payment_date: string | null
     last_contact_date: string | null
     last_call_outcome: string | null
+    chase: ChaseStatus
     created_at: string
     updated_at: string
 }
