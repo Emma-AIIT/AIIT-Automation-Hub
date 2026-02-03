@@ -111,7 +111,7 @@ export const CallLogTable: FC<CallLogTableProps> = ({ calls, loading, onCallClic
     return (
       <div className="text-center py-12">
         <p className="text-[var(--color-text-muted)]">No calls found</p>
-        <p className="text-xs text-[var(--color-text-faint)] mt-1">Calls will appear here once VAPI is configured</p>
+        <p className="text-xs text-[var(--color-text-faint)] mt-1">Calls will appear as soon as we receive calls. Enjoy the peace and quiet :)</p>
       </div>
     );
   }

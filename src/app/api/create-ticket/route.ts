@@ -4,7 +4,8 @@ import { z } from 'zod';
 
 const CreateTicketSchema = z.object({
   caller_name: z.string(),
-  caller_phone: z.string(),
+  caller_phone: z.string().optional(),
+  caller_email: z.string().email().optional(),
   caller_business: z.string().optional(),
   inquiry: z.string(),
   summary: z.string().optional(),
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
       .from('support_tickets')
       .insert({
         caller_name: data.caller_name,
-        caller_phone: data.caller_phone,
+        caller_phone: data.caller_phone ?? null,
+        caller_email: data.caller_email ?? null,
         caller_business: data.caller_business ?? null,
         inquiry: data.inquiry,
         summary: data.summary ?? null,

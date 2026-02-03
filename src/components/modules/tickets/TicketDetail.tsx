@@ -2,7 +2,7 @@
 
 import { type FC, useState } from 'react';
 import { api } from '@/trpc/react';
-import { formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import type { TicketStatus } from '@/types/tickets';
 
 interface TicketDetailProps {
@@ -24,6 +24,15 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
     },
   });
 
+  const { data: workers } = api.workers.getAll.useQuery();
+
+  const assignWorkerMutation = api.tickets.assignWorker.useMutation({
+    onSuccess: () => {
+      void utils.tickets.getById.invalidate({ id: ticketId });
+      void utils.tickets.getAll.invalidate();
+    },
+  });
+
   const addNoteMutation = api.tickets.addNote.useMutation({
     onSuccess: () => {
       setNewNote('');
@@ -32,6 +41,7 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
   });
 
   const handleStatusChange = (status: TicketStatus) => {
+    if (ticket?.status === status) return;
     updateStatusMutation.mutate({ id: ticketId, status });
   };
 
@@ -70,7 +80,12 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
               <div>
                 <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Caller</p>
                 <p className="text-lg font-semibold text-[var(--color-brand-navy)] mt-1">{ticket.caller_name}</p>
-                <p className="text-sm text-[var(--color-text-muted)] font-mono">{ticket.caller_phone}</p>
+                {ticket.caller_phone && (
+                  <p className="text-sm text-[var(--color-text-muted)] font-mono">{ticket.caller_phone}</p>
+                )}
+                {ticket.caller_email && (
+                  <p className="text-sm text-[var(--color-text-muted)]">{ticket.caller_email}</p>
+                )}
                 {ticket.caller_business && (
                   <p className="text-sm text-[var(--color-text-muted)]">{ticket.caller_business}</p>
                 )}
@@ -79,7 +94,7 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
               <div>
                 <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Created</p>
                 <p className="text-sm text-[var(--color-brand-navy)] mt-1">
-                  {formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true })}
+                  {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
                 </p>
               </div>
 
@@ -101,6 +116,24 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Assigned To</p>
+                <select
+                  value={ticket.assigned_to ?? ''}
+                  onChange={(e) => assignWorkerMutation.mutate({
+                    id: ticketId,
+                    assigned_to: e.target.value || null,
+                  })}
+                  disabled={assignWorkerMutation.isPending}
+                  className="mt-2 w-full px-3 py-1.5 rounded-lg border border-[var(--color-border-default)] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)]"
+                >
+                  <option value="">Unassigned</option>
+                  {workers?.map((w) => (
+                    <option key={w.id} value={w.name}>{w.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
 

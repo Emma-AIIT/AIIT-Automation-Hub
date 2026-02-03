@@ -85,7 +85,9 @@ export const ticketsRouter = createTRPCRouter({
         .eq('id', input.id)
         .single();
 
-      const timestamp = new Date().toISOString();
+      const now = new Date();
+      const timestamp = now.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + now.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+      const isoTimestamp = now.toISOString();
       const newNote = `[${timestamp}] ${input.note}`;
       const updatedNotes = ticket?.notes
         ? `${ticket.notes}\n\n${newNote}`
@@ -93,7 +95,25 @@ export const ticketsRouter = createTRPCRouter({
 
       const { data, error } = await supabase
         .from('support_tickets')
-        .update({ notes: updatedNotes, updated_at: timestamp })
+        .update({ notes: updatedNotes, updated_at: isoTimestamp })
+        .eq('id', input.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as SupportTicket;
+    }),
+
+  assignWorker: publicProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      assigned_to: z.string().nullable(),
+    }))
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .update({ assigned_to: input.assigned_to, updated_at: new Date().toISOString() })
         .eq('id', input.id)
         .select()
         .single();
