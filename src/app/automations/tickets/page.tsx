@@ -1,7 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { keepPreviousData } from '@tanstack/react-query';
 import { api } from '@/trpc/react';
+import { getWorkerColor } from '@/lib/worker-colors';
+import { createClient } from '@/lib/supabase/client';
+import toast from 'react-hot-toast';
 import { TicketList } from '@/components/modules/tickets/TicketList';
 import { TicketDetail } from '@/components/modules/tickets/TicketDetail';
 import type { TicketStatus } from '@/types/tickets';
@@ -12,11 +16,13 @@ export default function TicketsPage() {
   const [showWorkers, setShowWorkers] = useState(false);
   const [newWorkerName, setNewWorkerName] = useState('');
 
-  const { data: tickets, isLoading } = api.tickets.getAll.useQuery({
-    status: statusFilter,
-  }, {
-    retry: false,
-  });
+  const { data: tickets, isLoading } = api.tickets.getAll.useQuery(
+    { status: statusFilter },
+    {
+      retry: false,
+      placeholderData: keepPreviousData,
+    }
+  );
 
   const { data: stats } = api.tickets.getStats.useQuery(undefined, {
     retry: false,
@@ -24,6 +30,52 @@ export default function TicketsPage() {
 
   const { data: workers } = api.workers.getAll.useQuery();
   const utils = api.useUtils();
+  const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null);
+
+  const handleMutationComplete = useCallback(
+    (ticketId: string) => {
+      if (selectedTicketId === ticketId) {
+        void utils.tickets.getById.invalidate({ id: ticketId });
+      }
+    },
+    [selectedTicketId, utils.tickets.getById]
+  );
+
+  const pullNewMutation = api.tickets.pullNew.useMutation({
+    onSuccess: () => {
+      toast.loading('Pulling new tickets...', { id: 'pull-tickets' });
+    },
+    onError: (err) => {
+      toast.error(err.message ?? 'Failed to pull tickets.');
+    },
+  });
+
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('tickets-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'support_tickets',
+        },
+        () => {
+          toast.dismiss('pull-tickets');
+          toast.success('New tickets received');
+          void utils.tickets.getAll.invalidate({ status: statusFilter });
+          void utils.tickets.getStats.invalidate();
+        }
+      )
+      .subscribe();
+    channelRef.current = channel;
+    return () => {
+      if (channelRef.current) {
+        void supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [statusFilter, utils]);
 
   const createWorkerMutation = api.workers.create.useMutation({
     onSuccess: () => {
@@ -79,8 +131,13 @@ export default function TicketsPage() {
               </button>
             </div>
             <div className="flex flex-wrap gap-2">
-              {workers?.map((w) => (
-                <span key={w.id} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-100 text-sm text-[var(--color-text-secondary)]">
+              {workers?.map((w) => {
+                const color = getWorkerColor(w.name);
+                return (
+                <span
+                  key={w.id}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${color ? `${color.bg} ${color.text} ${color.border}` : 'bg-gray-100 text-[var(--color-text-secondary)] border-gray-200'}`}
+                >
                   {w.name}
                   <button
                     onClick={() => deleteWorkerMutation.mutate({ id: w.id })}
@@ -92,7 +149,8 @@ export default function TicketsPage() {
                     </svg>
                   </button>
                 </span>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -113,29 +171,64 @@ export default function TicketsPage() {
           <p className="text-3xl font-bold text-emerald-600 mt-2">{stats?.resolved ?? 0}</p>
         </div>
         <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
-          <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Avg Resolution</p>
-          <p className="text-3xl font-bold text-[var(--color-brand-navy)] mt-2">{stats?.avgResolutionHours ?? 0}h</p>
+          <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Unassigned</p>
+          <p className="text-3xl font-bold text-[var(--color-brand-navy)] mt-2">{stats?.unassigned ?? 0}</p>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters + Pull new tickets */}
       <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-[var(--color-text-secondary)]">Filter:</span>
-          <div className="flex gap-2">
-            {(['all', 'open', 'in-progress', 'resolved'] as const).map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  statusFilter === status
-                    ? 'bg-[var(--color-brand-orange)] text-white'
-                    : 'bg-gray-100 text-[var(--color-text-secondary)] hover:bg-gray-200'
-                }`}
-              >
-                {status.charAt(0).toUpperCase() + status.slice(1).replace('-', ' ')}
-              </button>
-            ))}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-[var(--color-text-secondary)]">Filter:</span>
+            <div className="flex gap-2">
+              {(['all', 'open', 'in-progress', 'resolved'] as const).map((status) => (
+                <button
+                  key={status}
+                  onClick={() => setStatusFilter(status)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    statusFilter === status
+                      ? 'bg-[var(--color-brand-orange)] text-white'
+                      : 'bg-gray-100 text-[var(--color-text-secondary)] hover:bg-gray-200'
+                  }`}
+                >
+                  {status.charAt(0).toUpperCase() + status.slice(1).replace('-', ' ')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={() => pullNewMutation.mutate()}
+              disabled={pullNewMutation.isPending}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-brand-navy)] text-white text-sm font-medium hover:bg-[var(--color-brand-navy)]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {pullNewMutation.isPending ? (
+                <>
+                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                    <path d="M21 3v5h-5" />
+                  </svg>
+                  Pulling...
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Pull new tickets
+                </>
+              )}
+            </button>
+            <p className="text-xs text-[var(--color-text-muted)] text-right whitespace-nowrap">
+              Email tickets to{' '}
+              <a href="mailto:aidev@allinit.com.au" className="text-[var(--color-brand-navy)] hover:underline">
+                aidev@allinit.com.au
+              </a>{' '}
+              first.
+            </p>
           </div>
         </div>
       </div>
@@ -145,7 +238,10 @@ export default function TicketsPage() {
         <TicketList
           tickets={tickets ?? []}
           loading={isLoading}
+          workers={workers ?? []}
+          statusFilter={statusFilter}
           onTicketClick={(id) => setSelectedTicketId(id)}
+          onMutationComplete={handleMutationComplete}
         />
       </div>
 

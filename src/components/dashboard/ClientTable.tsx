@@ -5,7 +5,7 @@ import { type Client } from '@/types/database';
 import { api } from '@/trpc/react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { AvatarInitials } from '@/components/shared/AvatarInitials';
-import { formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 
 interface ClientTableProps {
   clients: Client[];
@@ -606,11 +606,18 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
                       <StatusBadge status={client.status} />
                     </td>
                     <td className="px-4 lg:px-6 py-4">
-                      <span className="text-sm text-[var(--color-text-muted)]">
-                        {client.last_contact_date
-                          ? formatDistanceToNow(new Date(client.last_contact_date), { addSuffix: true })
-                          : '—'}
-                      </span>
+                      {client.last_contact_date ? (
+                        <div className="flex flex-col">
+                          <span className="text-sm text-[var(--color-text-muted)]">
+                            {format(new Date(client.last_contact_date), 'dd/MM/yyyy h:mm a')}
+                          </span>
+                          <span className="text-xs text-[var(--color-text-faint)]">
+                            {formatDistanceToNow(new Date(client.last_contact_date), { addSuffix: true })}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-[var(--color-text-muted)]">—</span>
+                      )}
                     </td>
                     <td className="px-4 lg:px-6 py-4">
                       <span className={`text-sm font-medium ${
@@ -795,10 +802,19 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
                     {client.last_call_outcome ?? 'No calls'}
                   </span>
                 </div>
-                <div className="text-xs text-[var(--color-text-faint)]">
-                  {client.last_contact_date
-                    ? formatDistanceToNow(new Date(client.last_contact_date), { addSuffix: true })
-                    : 'Never contacted'}
+                <div className="flex flex-col items-end">
+                  {client.last_contact_date ? (
+                    <>
+                      <span className="text-xs text-[var(--color-text-muted)]">
+                        {format(new Date(client.last_contact_date), 'dd/MM/yyyy h:mm a')}
+                      </span>
+                      <span className="text-[10px] text-[var(--color-text-faint)]">
+                        {formatDistanceToNow(new Date(client.last_contact_date), { addSuffix: true })}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-[var(--color-text-faint)]">Never contacted</span>
+                  )}
                 </div>
               </div>
 

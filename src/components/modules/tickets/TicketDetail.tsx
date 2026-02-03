@@ -2,6 +2,7 @@
 
 import { type FC, useState } from 'react';
 import { api } from '@/trpc/react';
+import { getWorkerColor } from '@/lib/worker-colors';
 import { format } from 'date-fns';
 import type { TicketStatus } from '@/types/tickets';
 
@@ -40,6 +41,14 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
     },
   });
 
+  const deleteMutation = api.tickets.delete.useMutation({
+    onSuccess: () => {
+      void utils.tickets.getAll.invalidate();
+      void utils.tickets.getStats.invalidate();
+      onClose();
+    },
+  });
+
   const handleStatusChange = (status: TicketStatus) => {
     if (ticket?.status === status) return;
     updateStatusMutation.mutate({ id: ticketId, status });
@@ -48,6 +57,12 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
   const handleAddNote = () => {
     if (!newNote.trim()) return;
     addNoteMutation.mutate({ id: ticketId, note: newNote });
+  };
+
+  const handleDelete = () => {
+    if (window.confirm('Delete this ticket? This cannot be undone.')) {
+      deleteMutation.mutate({ id: ticketId });
+    }
   };
 
   return (
@@ -120,20 +135,28 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
 
               <div>
                 <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Assigned To</p>
-                <select
-                  value={ticket.assigned_to ?? ''}
-                  onChange={(e) => assignWorkerMutation.mutate({
-                    id: ticketId,
-                    assigned_to: e.target.value || null,
-                  })}
-                  disabled={assignWorkerMutation.isPending}
-                  className="mt-2 w-full px-3 py-1.5 rounded-lg border border-[var(--color-border-default)] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)]"
-                >
-                  <option value="">Unassigned</option>
-                  {workers?.map((w) => (
-                    <option key={w.id} value={w.name}>{w.name}</option>
-                  ))}
-                </select>
+                {(() => {
+                  const assignedTo = ticket.assigned_to ?? '';
+                  const color = assignedTo ? getWorkerColor(assignedTo) : null;
+                  return (
+                    <select
+                      value={assignedTo}
+                      onChange={(e) => assignWorkerMutation.mutate({
+                        id: ticketId,
+                        assigned_to: e.target.value || null,
+                      })}
+                      disabled={assignWorkerMutation.isPending}
+                      className={`mt-2 w-full px-3 py-1.5 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] ${
+                        color ? `border ${color.bg} ${color.text} ${color.border}` : 'border border-[var(--color-border-default)] bg-white'
+                      }`}
+                    >
+                      <option value="">Unassigned</option>
+                      {workers?.map((w) => (
+                        <option key={w.id} value={w.name}>{w.name}</option>
+                      ))}
+                    </select>
+                  );
+                })()}
               </div>
             </div>
 
@@ -192,6 +215,18 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
                   Add
                 </button>
               </div>
+            </div>
+
+            {/* Delete */}
+            <div className="pt-4 border-t border-[var(--color-border-subtle)]">
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteMutation.isPending}
+                className="px-4 py-2 rounded-lg border border-red-200 bg-red-50 text-red-600 text-sm font-medium hover:bg-red-100 disabled:opacity-50"
+              >
+                Delete ticket
+              </button>
             </div>
 
             {/* VAPI Call Link */}
