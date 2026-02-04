@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/stale-tickets",
-      "schedule": "0 22 * * *"
+      "schedule": "30 22 * * *"
     }
   ]
 }
