@@ -100,7 +100,7 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
             {/* Ticket Info */}
             <div className="bg-gray-50 rounded-xl p-6 space-y-4">
               <div>
-                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Caller</p>
+                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Customer</p>
                 <p className="text-lg font-semibold text-[var(--color-brand-navy)] mt-1">{ticket.caller_name}</p>
                 {ticket.caller_phone && (
                   <p className="text-sm text-[var(--color-text-muted)] font-mono">{ticket.caller_phone}</p>
