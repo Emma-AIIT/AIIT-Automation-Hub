@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
 import { TicketList } from '@/components/modules/tickets/TicketList';
 import { TicketDetail } from '@/components/modules/tickets/TicketDetail';
+import { CreateTicketModal } from '@/components/modules/tickets/CreateTicketModal';
 import type { TicketStatus } from '@/types/tickets';
 
 export default function TicketsPage() {
@@ -15,17 +16,20 @@ export default function TicketsPage() {
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [showWorkers, setShowWorkers] = useState(false);
   const [newWorkerName, setNewWorkerName] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const { data: tickets, isLoading } = api.tickets.getAll.useQuery(
     { status: statusFilter },
     {
       retry: false,
       placeholderData: keepPreviousData,
+      staleTime: 30 * 1000,
     }
   );
 
   const { data: stats } = api.tickets.getStats.useQuery(undefined, {
     retry: false,
+    staleTime: 30 * 1000,
   });
 
   const { data: workers } = api.workers.getAll.useQuery();
@@ -198,11 +202,23 @@ export default function TicketsPage() {
             </div>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <button
-              onClick={() => pullNewMutation.mutate()}
-              disabled={pullNewMutation.isPending}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-brand-navy)] text-white text-sm font-medium hover:bg-[var(--color-brand-navy)]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] text-sm font-medium hover:bg-[var(--color-bg-hover)] transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Create new ticket
+              </button>
+              <button
+                onClick={() => pullNewMutation.mutate()}
+                disabled={pullNewMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-brand-navy)] text-white text-sm font-medium hover:bg-[var(--color-brand-navy)]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
               {pullNewMutation.isPending ? (
                 <>
                   <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -221,7 +237,8 @@ export default function TicketsPage() {
                   Pull new tickets
                 </>
               )}
-            </button>
+              </button>
+            </div>
             <p className="text-xs text-[var(--color-text-muted)] text-right whitespace-nowrap">
               Email tickets to{' '}
               <a href="mailto:aidev@allinit.com.au" className="text-[var(--color-brand-navy)] hover:underline">
@@ -245,11 +262,20 @@ export default function TicketsPage() {
         />
       </div>
 
+      {/* Create Ticket Modal */}
+      <CreateTicketModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        workers={workers ?? []}
+        onSuccess={() => setShowCreateModal(false)}
+      />
+
       {/* Ticket Detail Modal */}
       {selectedTicketId && (
         <TicketDetail
           ticketId={selectedTicketId}
           onClose={() => setSelectedTicketId(null)}
+          workers={workers ?? undefined}
         />
       )}
     </div>

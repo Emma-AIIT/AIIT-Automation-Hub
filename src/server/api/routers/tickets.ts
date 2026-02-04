@@ -141,6 +141,43 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  create: publicProcedure
+    .input(z.object({
+      caller_name: z.string().min(1),
+      caller_business: z.string().optional(),
+      inquiry: z.string().min(1),
+      summary: z.string().optional(),
+      assigned_to: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+      const now = new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .insert({
+          caller_name: input.caller_name.trim(),
+          caller_phone: null,
+          caller_email: null,
+          caller_business: input.caller_business?.trim() ?? null,
+          inquiry: input.inquiry.trim(),
+          summary: input.summary?.trim() ?? null,
+          status: 'open',
+          assigned_to: input.assigned_to?.trim() ?? null,
+          vapi_call_id: null,
+          recording_url: null,
+          notes: null,
+          created_at: now,
+          updated_at: now,
+          resolved_at: null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as SupportTicket;
+    }),
+
   pullNew: publicProcedure.mutation(async () => {
     const webhookUrl = env.MAKE_PULL_TICKETS_WEBHOOK_URL;
 
@@ -173,33 +210,40 @@ export const ticketsRouter = createTRPCRouter({
   getStats: publicProcedure.query(async () => {
     const supabase = await createClient();
 
-    const { data: tickets } = await supabase
-      .from('support_tickets')
-      .select('*');
+    const [
+      { count: open },
+      { count: inProgress },
+      { count: resolved },
+      { count: unassignedNull },
+      { count: unassignedEmpty },
+      { count: total },
+      { data: resolutionData },
+    ] = await Promise.all([
+      supabase.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+      supabase.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'in-progress'),
+      supabase.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'resolved'),
+      supabase.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'open').is('assigned_to', null),
+      supabase.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'open').eq('assigned_to', ''),
+      supabase.from('support_tickets').select('id', { count: 'exact', head: true }),
+      supabase.from('support_tickets').select('created_at, resolved_at').not('resolved_at', 'is', null),
+    ]);
 
-    if (!tickets) return { open: 0, inProgress: 0, resolved: 0, total: 0, unassigned: 0, avgResolutionHours: 0 };
+    const unassigned = (unassignedNull ?? 0) + (unassignedEmpty ?? 0);
 
-    const open = tickets.filter(t => t.status === 'open').length;
-    const inProgress = tickets.filter(t => t.status === 'in-progress').length;
-    const resolved = tickets.filter(t => t.status === 'resolved').length;
-    const unassigned = tickets.filter(t =>
-      t.status === 'open' && (!t.assigned_to || String(t.assigned_to).trim() === '')
-    ).length;
-
-    const resolvedTickets = tickets.filter(t => t.resolved_at);
+    const resolvedTickets = (resolutionData ?? []) as { created_at: string; resolved_at: string }[];
     const avgResolutionTime = resolvedTickets.length > 0
       ? resolvedTickets.reduce((sum, t) => {
-          const created = new Date(t.created_at as string).getTime();
-          const resolvedAt = new Date(t.resolved_at as string).getTime();
+          const created = new Date(t.created_at).getTime();
+          const resolvedAt = new Date(t.resolved_at).getTime();
           return sum + (resolvedAt - created);
         }, 0) / resolvedTickets.length
       : 0;
 
     return {
-      open,
-      inProgress,
-      resolved,
-      total: tickets.length,
+      open: open ?? 0,
+      inProgress: inProgress ?? 0,
+      resolved: resolved ?? 0,
+      total: total ?? 0,
       unassigned,
       avgResolutionHours: Math.floor(avgResolutionTime / (1000 * 60 * 60)),
     };

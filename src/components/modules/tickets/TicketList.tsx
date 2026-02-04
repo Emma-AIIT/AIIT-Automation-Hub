@@ -39,6 +39,134 @@ const getStatusColor = (status: string) => {
 
 const STATUS_OPTIONS: TicketStatus[] = ['open', 'in-progress', 'resolved'];
 
+interface TicketRowProps {
+  ticket: SupportTicket;
+  workers: Worker[];
+  openStatusId: string | null;
+  onOpenStatusToggle: (ticketId: string) => void;
+  updateStatusPending: boolean;
+  assignPending: boolean;
+  deletePending: boolean;
+  onTicketClick: (id: string) => void;
+  onStatusSelect: (ticketId: string, status: TicketStatus) => void;
+  onAssignChange: (ticketId: string, assignedTo: string | null) => void;
+  onDelete: (e: React.MouseEvent, ticketId: string) => void;
+}
+
+const TicketRow = memo(function TicketRow({
+  ticket,
+  workers,
+  openStatusId,
+  onOpenStatusToggle,
+  updateStatusPending,
+  assignPending,
+  deletePending,
+  onTicketClick,
+  onStatusSelect,
+  onAssignChange,
+  onDelete,
+}: TicketRowProps) {
+  const assignedTo = ticket.assigned_to ?? '';
+  const color = assignedTo ? getWorkerColor(assignedTo) : null;
+  const isStatusOpen = openStatusId === ticket.id;
+
+  return (
+    <tr
+      onClick={() => onTicketClick(ticket.id)}
+      className={`border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors ${
+        ticket.status === 'open' ? getOpenAgeBorderColor(ticket.created_at) : ''
+      }`}
+    >
+      <td className="py-3 px-4 text-sm text-[var(--color-text-primary)]">
+        {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
+      </td>
+      <td className="py-3 px-4 text-sm font-medium text-[var(--color-text-primary)]">
+        {ticket.caller_name}
+      </td>
+      <td className="py-3 px-4 text-sm text-[var(--color-text-muted)]">
+        {ticket.caller_business ?? '-'}
+      </td>
+      <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-xs truncate">
+        {ticket.inquiry}
+      </td>
+      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+        <select
+          value={assignedTo}
+          onChange={(e) => onAssignChange(ticket.id, e.target.value || null)}
+          disabled={assignPending}
+          className={`w-full max-w-[140px] px-2 py-1 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] focus:border-transparent font-medium ${
+            color ? `border-l-4 border ${color.bg} ${color.text} ${color.border}` : 'border border-[var(--color-border-default)] bg-white'
+          }`}
+        >
+          <option value="">—</option>
+          {workers.map((w) => (
+            <option key={w.id} value={w.name}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => onOpenStatusToggle(ticket.id)}
+            disabled={updateStatusPending}
+            className={`inline-flex px-2 py-1 rounded-md text-xs font-medium transition-colors hover:opacity-90 ${getStatusColor(ticket.status)}`}
+          >
+            {ticket.status.replace('-', ' ')}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-1 inline">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {isStatusOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                aria-hidden
+                onClick={() => onOpenStatusToggle(ticket.id)}
+              />
+              <div className="absolute left-0 top-full mt-1 z-20 min-w-[140px] rounded-lg border border-[var(--color-border-subtle)] bg-white shadow-lg py-1">
+                {STATUS_OPTIONS.map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => onStatusSelect(ticket.id, status)}
+                    className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg ${
+                      ticket.status === status ? 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)] font-medium' : 'text-[var(--color-text-secondary)]'
+                    }`}
+                  >
+                    {status.replace('-', ' ')}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </td>
+      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onTicketClick(ticket.id)}
+            className="text-sm text-[var(--color-brand-orange)] hover:underline font-medium"
+          >
+            View
+          </button>
+          <button
+            type="button"
+            onClick={(e) => onDelete(e, ticket.id)}
+            disabled={deletePending}
+            className="text-sm text-red-600 hover:text-red-700 hover:underline font-medium disabled:opacity-50"
+          >
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 export const TicketList: FC<TicketListProps> = memo(function TicketList({
   tickets,
   loading,
@@ -228,106 +356,20 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
         </thead>
         <tbody>
           {tickets.map((ticket) => (
-            <tr
+            <TicketRow
               key={ticket.id}
-              onClick={() => onTicketClick(ticket.id)}
-              className={`border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors ${
-                ticket.status === 'open' ? getOpenAgeBorderColor(ticket.created_at) : ''
-              }`}
-            >
-              <td className="py-3 px-4 text-sm text-[var(--color-text-primary)]">
-                {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
-              </td>
-              <td className="py-3 px-4 text-sm font-medium text-[var(--color-text-primary)]">
-                {ticket.caller_name}
-              </td>
-              <td className="py-3 px-4 text-sm text-[var(--color-text-muted)]">
-                {ticket.caller_business ?? '-'}
-              </td>
-              <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-xs truncate">
-                {ticket.inquiry}
-              </td>
-              <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                {(() => {
-                  const assignedTo = ticket.assigned_to ?? '';
-                  const color = assignedTo ? getWorkerColor(assignedTo) : null;
-                  return (
-                    <select
-                      value={assignedTo}
-                      onChange={(e) => handleAssignChange(ticket.id, e.target.value || null)}
-                      disabled={assignWorkerMutation.isPending}
-                      className={`w-full max-w-[140px] px-2 py-1 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] focus:border-transparent font-medium ${
-                        color ? `border-l-4 border ${color.bg} ${color.text} ${color.border}` : 'border border-[var(--color-border-default)] bg-white'
-                      }`}
-                    >
-                      <option value="">—</option>
-                      {workers.map((w) => (
-                        <option key={w.id} value={w.name}>
-                          {w.name}
-                        </option>
-                      ))}
-                    </select>
-                  );
-                })()}
-              </td>
-              <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setOpenStatusId((id) => (id === ticket.id ? null : ticket.id))}
-                    disabled={updateStatusMutation.isPending}
-                    className={`inline-flex px-2 py-1 rounded-md text-xs font-medium transition-colors hover:opacity-90 ${getStatusColor(ticket.status)}`}
-                  >
-                    {ticket.status.replace('-', ' ')}
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-1 inline">
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </button>
-                  {openStatusId === ticket.id && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        aria-hidden
-                        onClick={() => setOpenStatusId(null)}
-                      />
-                      <div className="absolute left-0 top-full mt-1 z-20 min-w-[140px] rounded-lg border border-[var(--color-border-subtle)] bg-white shadow-lg py-1">
-                        {STATUS_OPTIONS.map((status) => (
-                          <button
-                            key={status}
-                            type="button"
-                            onClick={() => handleStatusSelect(ticket.id, status)}
-                            className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg ${
-                              ticket.status === status ? 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)] font-medium' : 'text-[var(--color-text-secondary)]'
-                            }`}
-                          >
-                            {status.replace('-', ' ')}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </td>
-              <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => onTicketClick(ticket.id)}
-                    className="text-sm text-[var(--color-brand-orange)] hover:underline font-medium"
-                  >
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => handleDelete(e, ticket.id)}
-                    disabled={deleteMutation.isPending}
-                    className="text-sm text-red-600 hover:text-red-700 hover:underline font-medium disabled:opacity-50"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </td>
-            </tr>
+              ticket={ticket}
+              workers={workers}
+              openStatusId={openStatusId}
+              onOpenStatusToggle={(id) => setOpenStatusId((current) => (current === id ? null : id))}
+              updateStatusPending={updateStatusMutation.isPending}
+              assignPending={assignWorkerMutation.isPending}
+              deletePending={deleteMutation.isPending}
+              onTicketClick={onTicketClick}
+              onStatusSelect={handleStatusSelect}
+              onAssignChange={handleAssignChange}
+              onDelete={handleDelete}
+            />
           ))}
         </tbody>
       </table>
