@@ -65,7 +65,7 @@ export const CreateTicketModal: FC<CreateTicketModalProps> = ({
     const name = callerName.trim();
     const inv = inquiry.trim();
     if (!name || !inv) {
-      toast.error('Client/Caller and Inquiry are required');
+      toast.error('Customer and Inquiry are required');
       return;
     }
     createMutation.mutate({
@@ -155,7 +155,7 @@ export const CreateTicketModal: FC<CreateTicketModalProps> = ({
                 htmlFor="create-caller"
                 className="block text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
               >
-                Client / Caller <span className="text-[var(--color-brand-orange)]">*</span>
+                Customer <span className="text-[var(--color-brand-orange)]">*</span>
               </label>
               <input
                 id="create-caller"

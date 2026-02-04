@@ -23,9 +23,9 @@ interface TicketListProps {
 
 const getOpenAgeBorderColor = (createdAt: string) => {
   const days = differenceInDays(new Date(), new Date(createdAt));
-  if (days <= 1) return 'border-l-4 border-l-emerald-500';
-  if (days <= 3) return 'border-l-4 border-l-orange-500';
-  return 'border-l-4 border-l-red-500';
+  if (days <= 1) return 'border-l-4 border-l-emerald-500'; // Green: 0-1 days
+  if (days === 2) return 'border-l-4 border-l-yellow-500'; // Yellow: 2 days
+  return 'border-l-4 border-l-red-500'; // Red: 3+ days
 };
 
 const getStatusColor = (status: string) => {
@@ -346,7 +346,7 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
         <thead>
           <tr className="border-b border-[var(--color-border-subtle)]">
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Created</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Caller</th>
+            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Customer</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Business</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Inquiry</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Assigned To</th>
