@@ -37,6 +37,26 @@ const getStatusColor = (status: string) => {
   }
 };
 
+const PriorityDisplay: FC<{ priority: string | null }> = ({ priority }) => {
+  if (priority === 'high') {
+    return (
+      <div className="flex items-center gap-0.5 text-red-600" title="High Priority">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+      </div>
+    );
+  }
+  if (priority === 'low') {
+    return (
+      <div className="flex items-center text-blue-600" title="Low Priority">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+      </div>
+    );
+  }
+  return <span className="text-gray-400">—</span>;
+};
+
 const STATUS_OPTIONS: TicketStatus[] = ['open', 'in-progress', 'resolved'];
 
 interface TicketRowProps {
@@ -79,6 +99,9 @@ const TicketRow = memo(function TicketRow({
     >
       <td className="py-3 px-4 text-sm text-[var(--color-text-primary)]">
         {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
+      </td>
+      <td className="py-3 px-4">
+        <PriorityDisplay priority={ticket.priority} />
       </td>
       <td className="py-3 px-4 text-sm font-medium text-[var(--color-text-primary)]">
         {ticket.caller_name}
@@ -346,6 +369,7 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
         <thead>
           <tr className="border-b border-[var(--color-border-subtle)]">
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Created</th>
+            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Priority</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Customer</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Business</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Inquiry</th>

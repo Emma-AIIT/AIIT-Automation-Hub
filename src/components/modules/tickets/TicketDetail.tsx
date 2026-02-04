@@ -4,7 +4,7 @@ import { type FC, useState } from 'react';
 import { api } from '@/trpc/react';
 import { getWorkerColor } from '@/lib/worker-colors';
 import { format } from 'date-fns';
-import type { TicketStatus } from '@/types/tickets';
+import type { TicketStatus, TicketPriority } from '@/types/tickets';
 
 interface Worker {
   id: string;
@@ -48,6 +48,26 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
     },
   });
 
+  const updatePriorityMutation = api.tickets.updatePriority.useMutation({
+    onMutate: async (newData) => {
+      await utils.tickets.getById.cancel({ id: ticketId });
+      const previous = utils.tickets.getById.getData({ id: ticketId });
+      utils.tickets.getById.setData({ id: ticketId }, (old) =>
+        old ? { ...old, priority: newData.priority, priority_reason: newData.priority_reason ?? null } : old
+      );
+      return { previous };
+    },
+    onError: (_err, _newData, context) => {
+      if (context?.previous) {
+        utils.tickets.getById.setData({ id: ticketId }, context.previous);
+      }
+    },
+    onSettled: () => {
+      void utils.tickets.getById.invalidate({ id: ticketId });
+      void utils.tickets.getAll.invalidate();
+    },
+  });
+
   const deleteMutation = api.tickets.delete.useMutation({
     onSuccess: () => {
       void utils.tickets.getAll.invalidate();
@@ -59,6 +79,11 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
   const handleStatusChange = (status: TicketStatus) => {
     if (ticket?.status === status) return;
     updateStatusMutation.mutate({ id: ticketId, status });
+  };
+
+  const handlePriorityChange = (priority: TicketPriority) => {
+    if (ticket?.priority === priority) return;
+    updatePriorityMutation.mutate({ id: ticketId, priority, priority_reason: null });
   };
 
   const handleAddNote = () => {
@@ -138,6 +163,54 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Priority</p>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => handlePriorityChange('high')}
+                    disabled={updatePriorityMutation.isPending}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      ticket.priority === 'high'
+                        ? 'bg-red-500 text-white'
+                        : 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100'
+                    }`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+                    High
+                  </button>
+                  <button
+                    onClick={() => handlePriorityChange('low')}
+                    disabled={updatePriorityMutation.isPending}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      ticket.priority === 'low'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'
+                    }`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+                    Low
+                  </button>
+                  <button
+                    onClick={() => handlePriorityChange(null)}
+                    disabled={updatePriorityMutation.isPending}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      ticket.priority === null
+                        ? 'bg-gray-500 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    None
+                  </button>
+                </div>
+                {ticket.priority_reason && (
+                  <p className="mt-2 text-sm text-[var(--color-text-secondary)] bg-gray-50 rounded-lg p-3">
+                    {ticket.priority_reason}
+                  </p>
+                )}
               </div>
 
               <div>

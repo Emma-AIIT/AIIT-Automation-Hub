@@ -141,6 +141,29 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  updatePriority: publicProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      priority: z.enum(['high', 'low']).nullable(),
+      priority_reason: z.string().nullable().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .update({
+          priority: input.priority,
+          priority_reason: input.priority_reason ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', input.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data as SupportTicket;
+    }),
+
   create: publicProcedure
     .input(z.object({
       caller_name: z.string().min(1),

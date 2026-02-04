@@ -1,5 +1,7 @@
 export type TicketStatus = 'open' | 'in-progress' | 'resolved';
 
+export type TicketPriority = 'high' | 'low' | null;
+
 export interface SupportTicket {
   id: string;
   caller_name: string;
@@ -16,4 +18,6 @@ export interface SupportTicket {
   created_at: string;
   resolved_at: string | null;
   updated_at: string;
+  priority: TicketPriority;
+  priority_reason: string | null;
 }
