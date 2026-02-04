@@ -185,18 +185,13 @@ export const ticketsRouter = createTRPCRouter({
       throw new Error("MAKE_PULL_TICKETS_WEBHOOK_URL is not configured");
     }
 
+    let response: Response;
     try {
-      const response = await fetch(webhookUrl, {
+      response = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ timestamp: new Date().toISOString() }),
       });
-
-      if (!response.ok) {
-        throw new Error(`Make.com webhook returned status ${response.status}`);
-      }
-
-      return { success: true, message: "Pull started" };
     } catch (error) {
       console.error("Error triggering Make.com pull tickets webhook:", error);
       throw new Error(
@@ -205,6 +200,46 @@ export const ticketsRouter = createTRPCRouter({
           : "Failed to pull tickets"
       );
     }
+
+    const raw = await response.text();
+    let body: unknown = null;
+    if (raw.trim()) {
+      try {
+        body = JSON.parse(raw) as unknown;
+      } catch {
+        body = raw;
+      }
+    }
+
+    if (!response.ok) {
+      const errMessage =
+        typeof body === "object" &&
+        body !== null &&
+        "message" in body &&
+        typeof (body as { message: unknown }).message === "string"
+          ? (body as { message: string }).message
+          : typeof body === "object" &&
+              body !== null &&
+              "error" in body &&
+              typeof (body as { error: unknown }).error === "string"
+            ? (body as { error: string }).error
+            : typeof body === "string"
+              ? body
+              : `Make.com webhook returned ${response.status}`;
+      throw new Error(errMessage);
+    }
+
+    const parsed = body as Record<string, unknown> | null;
+    const success = parsed?.success === true;
+    const message = typeof parsed?.message === "string" ? parsed.message : undefined;
+    const ticketsProcessed =
+      typeof parsed?.tickets_processed === "number" ? parsed.tickets_processed : undefined;
+
+    return {
+      success: success ?? true,
+      message: message ?? "Pull complete",
+      tickets_processed: ticketsProcessed,
+    };
   }),
 
   getStats: publicProcedure.query(async () => {

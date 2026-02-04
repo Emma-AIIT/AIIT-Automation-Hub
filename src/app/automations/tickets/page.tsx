@@ -46,11 +46,23 @@ export default function TicketsPage() {
   );
 
   const pullNewMutation = api.tickets.pullNew.useMutation({
-    onSuccess: () => {
+    onMutate: () => {
       toast.loading('Pulling new tickets...', { id: 'pull-tickets' });
     },
+    onSuccess: (data) => {
+      toast.dismiss('pull-tickets');
+      const count = data.tickets_processed;
+      if (count === 0) {
+        toast('No new tickets found', { id: 'pull-tickets-result', icon: 'ℹ️', duration: 5000 });
+      } else if (typeof count !== 'number' || count <= 0) {
+        toast.success(data.message ?? 'Pull complete', { id: 'pull-tickets-result' });
+      }
+      void utils.tickets.getAll.invalidate({ status: statusFilter });
+      void utils.tickets.getStats.invalidate();
+    },
     onError: (err) => {
-      toast.error(err.message ?? 'Failed to pull tickets.');
+      toast.dismiss('pull-tickets');
+      toast.error(err.message ?? 'Failed to pull tickets.', { id: 'pull-tickets-result' });
     },
   });
 
@@ -67,7 +79,6 @@ export default function TicketsPage() {
         },
         () => {
           toast.dismiss('pull-tickets');
-          toast.success('New tickets received');
           void utils.tickets.getAll.invalidate({ status: statusFilter });
           void utils.tickets.getStats.invalidate();
         }
