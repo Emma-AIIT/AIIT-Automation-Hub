@@ -6,12 +6,18 @@ import { getWorkerColor } from '@/lib/worker-colors';
 import { format } from 'date-fns';
 import type { TicketStatus } from '@/types/tickets';
 
+interface Worker {
+  id: string;
+  name: string;
+}
+
 interface TicketDetailProps {
   ticketId: string;
   onClose: () => void;
+  workers?: Worker[] | null;
 }
 
-export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
+export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers: workersProp }) => {
   const { data: ticket, isLoading } = api.tickets.getById.useQuery({ id: ticketId });
   const [newNote, setNewNote] = useState('');
 
@@ -25,7 +31,8 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose }) => {
     },
   });
 
-  const { data: workers } = api.workers.getAll.useQuery();
+  const { data: workersFetched } = api.workers.getAll.useQuery(undefined, { enabled: workersProp == null });
+  const workers = workersProp ?? workersFetched;
 
   const assignWorkerMutation = api.tickets.assignWorker.useMutation({
     onSuccess: () => {
