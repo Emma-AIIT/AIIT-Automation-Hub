@@ -29,22 +29,6 @@ const getOpenAgeBorderColor = (createdAt: string) => {
   return 'border-l-4 border-l-red-500'; // Red: 3+ days
 };
 
-/** Strip HTML tags for table display so inquiry column shows plain text only */
-function inquiryPlainText(inquiry: string): string {
-  if (!inquiry?.trim()) return '';
-  const stripped = inquiry
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .trim();
-  return stripped.replace(/\n+/g, ' ').trim();
-}
-
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'open': return 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)]';
@@ -173,8 +157,8 @@ const TicketRow = memo(function TicketRow({
       <td className="py-3 px-4 text-sm text-[var(--color-text-muted)]">
         {ticket.caller_business ?? '-'}
       </td>
-      <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-xs truncate" title={inquiryPlainText(ticket.inquiry)}>
-        {inquiryPlainText(ticket.inquiry)}
+      <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-xs truncate" title={ticket.summary ?? undefined}>
+        {ticket.summary ?? '-'}
       </td>
       <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
         <select
@@ -561,7 +545,7 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Priority</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Customer</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Business</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Inquiry</th>
+            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Summary</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Assigned To</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Status</th>
             <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Actions</th>
