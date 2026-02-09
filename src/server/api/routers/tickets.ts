@@ -3,7 +3,7 @@ import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { env } from "~/env";
-import type { SupportTicket } from "@/types/tickets";
+import type { SupportTicket, TicketAttachment } from "@/types/tickets";
 
 export const ticketsRouter = createTRPCRouter({
   getAll: publicProcedure
@@ -35,14 +35,25 @@ export const ticketsRouter = createTRPCRouter({
     .query(async ({ input }) => {
       const supabase = await createClient();
 
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('id', input.id)
-        .single();
+      const [ticketResult, attachmentsResult] = await Promise.all([
+        supabase
+          .from('support_tickets')
+          .select('*')
+          .eq('id', input.id)
+          .single(),
+        supabase
+          .from('ticket_attachments')
+          .select('*')
+          .eq('ticket_id', input.id)
+          .order('created_at', { ascending: true }),
+      ]);
 
-      if (error) throw error;
-      return data as SupportTicket;
+      if (ticketResult.error) throw ticketResult.error;
+
+      return {
+        ...(ticketResult.data as SupportTicket),
+        attachments: (attachmentsResult.data ?? []) as TicketAttachment[],
+      };
     }),
 
   updateStatus: publicProcedure
@@ -110,6 +121,16 @@ export const ticketsRouter = createTRPCRouter({
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {
       const supabase = createAdminClient();
+
+      const { data: attachments } = await supabase
+        .from('ticket_attachments')
+        .select('storage_path')
+        .eq('ticket_id', input.id);
+      const paths = (attachments ?? []).map((a) => (a as { storage_path: string }).storage_path);
+      if (paths.length > 0) {
+        await supabase.storage.from('ticket-attachments').remove(paths);
+      }
+
       const { data, error } = await supabase
         .from('support_tickets')
         .delete()
@@ -121,6 +142,43 @@ export const ticketsRouter = createTRPCRouter({
         throw new Error('Ticket not found or could not be deleted');
       }
       return { success: true };
+    }),
+
+  deleteMany: publicProcedure
+    .input(z.object({ ids: z.array(z.string().uuid()).min(1).max(100) }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      let deleted = 0;
+      const errors: string[] = [];
+
+      for (const id of input.ids) {
+        try {
+          const { data: attachments } = await supabase
+            .from('ticket_attachments')
+            .select('storage_path')
+            .eq('ticket_id', id);
+          const paths = (attachments ?? []).map((a) => (a as { storage_path: string }).storage_path);
+          if (paths.length > 0) {
+            await supabase.storage.from('ticket-attachments').remove(paths);
+          }
+
+          const { data, error } = await supabase
+            .from('support_tickets')
+            .delete()
+            .eq('id', id)
+            .select('id');
+
+          if (error) {
+            errors.push(`${id}: ${error.message}`);
+            continue;
+          }
+          if (data && data.length > 0) deleted += 1;
+        } catch (e) {
+          errors.push(`${id}: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      }
+
+      return { deleted, errors: errors.length > 0 ? errors : undefined };
     }),
 
   assignWorker: publicProcedure
@@ -164,6 +222,35 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  getAttachmentUrl: publicProcedure
+    .input(z.object({ storage_path: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase.storage
+        .from('ticket-attachments')
+        .createSignedUrl(input.storage_path, 3600); // 1hr expiry
+      if (error) throw error;
+      if (!data?.signedUrl) throw new Error('Failed to create signed URL');
+      return { url: data.signedUrl };
+    }),
+
+  getAttachmentUrls: publicProcedure
+    .input(z.object({ storage_paths: z.array(z.string().min(1)).max(50) }))
+    .query(async ({ input }) => {
+      if (input.storage_paths.length === 0) return { urls: [] as { storage_path: string; url: string }[] };
+      const supabase = createAdminClient();
+      const results = await Promise.all(
+        input.storage_paths.map(async (storage_path) => {
+          const { data, error } = await supabase.storage
+            .from('ticket-attachments')
+            .createSignedUrl(storage_path, 3600);
+          if (error || !data?.signedUrl) return { storage_path, url: '' };
+          return { storage_path, url: data.signedUrl };
+        })
+      );
+      return { urls: results };
+    }),
+
   create: publicProcedure
     .input(z.object({
       caller_name: z.string().min(1),
@@ -171,6 +258,7 @@ export const ticketsRouter = createTRPCRouter({
       inquiry: z.string().min(1),
       summary: z.string().optional(),
       assigned_to: z.string().optional(),
+      source: z.enum(['phone', 'email', 'manual', 'walk-in']).default('manual'),
     }))
     .mutation(async ({ input }) => {
       const supabase = await createClient();
@@ -193,6 +281,9 @@ export const ticketsRouter = createTRPCRouter({
           created_at: now,
           updated_at: now,
           resolved_at: null,
+          source: input.source,
+          priority: null,
+          priority_reason: null,
         })
         .select()
         .single();

@@ -31,6 +31,7 @@ export const CreateTicketModal: FC<CreateTicketModalProps> = ({
   const [inquiry, setInquiry] = useState('');
   const [summary, setSummary] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
+  const [source, setSource] = useState<'manual' | 'walk-in' | 'phone'>('manual');
   const [touched, setTouched] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,6 +56,7 @@ export const CreateTicketModal: FC<CreateTicketModalProps> = ({
     setInquiry('');
     setSummary('');
     setAssignedTo('');
+    setSource('manual');
     setTouched(false);
     onClose();
   }, [onClose]);
@@ -74,6 +76,7 @@ export const CreateTicketModal: FC<CreateTicketModalProps> = ({
       inquiry: inv,
       summary: summary.trim() || undefined,
       assigned_to: assignedTo.trim() || undefined,
+      source,
     });
   };
 
@@ -232,6 +235,25 @@ export const CreateTicketModal: FC<CreateTicketModalProps> = ({
                 rows={2}
                 className="w-full px-4 py-2.5 rounded-xl border border-[var(--color-input-border)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] bg-[var(--color-input-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-input-focus)] focus:border-transparent resize-none transition-shadow"
               />
+            </div>
+
+            <div className="space-y-2">
+              <label
+                htmlFor="create-source"
+                className="block text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+              >
+                Source
+              </label>
+              <select
+                id="create-source"
+                value={source}
+                onChange={(e) => setSource(e.target.value as 'manual' | 'walk-in' | 'phone')}
+                className="w-full px-4 py-2.5 rounded-xl border border-[var(--color-input-border)] text-sm text-[var(--color-text-primary)] bg-[var(--color-input-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-input-focus)] focus:border-transparent"
+              >
+                <option value="manual">Manual</option>
+                <option value="walk-in">Walk-in</option>
+                <option value="phone">Phone</option>
+              </select>
             </div>
 
             <div className="space-y-2">

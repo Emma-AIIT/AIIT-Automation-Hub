@@ -2,6 +2,7 @@
 
 import { type FC } from 'react';
 import Link from 'next/link';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 export interface AgentStatusItem {
   id: string;
@@ -30,12 +31,12 @@ export const AgentStatusCards: FC<AgentStatusCardsProps> = ({ agents = [], isLoa
         <div className="space-y-3">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="flex items-center gap-3 p-3 rounded-xl">
-              <div className="w-2 h-2 rounded-full bg-[var(--color-bg-hover)] animate-pulse" />
+              <Skeleton className="w-2 h-2 rounded-full shrink-0" />
               <div className="flex-1 min-w-0 space-y-1">
-                <div className="h-4 w-24 bg-[var(--color-bg-hover)] rounded animate-pulse" />
-                <div className="h-3 w-28 bg-[var(--color-bg-hover)] rounded animate-pulse" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-28" />
               </div>
-              <div className="h-4 w-6 bg-[var(--color-bg-hover)] rounded animate-pulse" />
+              <Skeleton className="h-4 w-6 shrink-0" />
             </div>
           ))}
         </div>

@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { TicketList } from '@/components/modules/tickets/TicketList';
 import { TicketDetail } from '@/components/modules/tickets/TicketDetail';
 import { CreateTicketModal } from '@/components/modules/tickets/CreateTicketModal';
+import { SkeletonStatsCard } from '@/components/ui/Skeleton';
 import type { TicketStatus } from '@/types/tickets';
 
 export default function TicketsPage() {
@@ -27,7 +28,7 @@ export default function TicketsPage() {
     }
   );
 
-  const { data: stats } = api.tickets.getStats.useQuery(undefined, {
+  const { data: stats, isLoading: statsLoading } = api.tickets.getStats.useQuery(undefined, {
     retry: false,
     staleTime: 30 * 1000,
   });
@@ -173,22 +174,32 @@ export default function TicketsPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-        <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
-          <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Open</p>
-          <p className="text-3xl font-bold text-[var(--color-brand-orange)] mt-2">{stats?.open ?? 0}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
-          <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">In Progress</p>
-          <p className="text-3xl font-bold text-amber-600 mt-2">{stats?.inProgress ?? 0}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
-          <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Resolved</p>
-          <p className="text-3xl font-bold text-emerald-600 mt-2">{stats?.resolved ?? 0}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
-          <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Unassigned</p>
-          <p className="text-3xl font-bold text-[var(--color-brand-navy)] mt-2">{stats?.unassigned ?? 0}</p>
-        </div>
+        {statsLoading ? (
+          <>
+            {[1, 2, 3, 4].map((i) => (
+              <SkeletonStatsCard key={i} />
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
+              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Open</p>
+              <p className="text-3xl font-bold text-[var(--color-brand-orange)] mt-2">{stats?.open ?? 0}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
+              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">In Progress</p>
+              <p className="text-3xl font-bold text-amber-600 mt-2">{stats?.inProgress ?? 0}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
+              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Resolved</p>
+              <p className="text-3xl font-bold text-emerald-600 mt-2">{stats?.resolved ?? 0}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-6">
+              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Unassigned</p>
+              <p className="text-3xl font-bold text-[var(--color-brand-navy)] mt-2">{stats?.unassigned ?? 0}</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Filters + Pull new tickets */}

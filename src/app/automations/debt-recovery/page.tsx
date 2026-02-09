@@ -6,6 +6,7 @@ import { StatsCard } from '@/components/dashboard/StatsCard';
 import { ClientTable } from '@/components/dashboard/ClientTable';
 import { ClientDetailDrawer } from '@/components/dashboard/ClientDetailDrawer';
 import { SyncButton } from '@/components/dashboard/SyncButton';
+import { SkeletonStatsCard, SkeletonTable } from '@/components/ui/Skeleton';
 
 export default function DebtRecoveryPage() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -80,8 +81,8 @@ export default function DebtRecoveryPage() {
       {/* Loading state for stats */}
       {statsLoading && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-32 rounded-2xl bg-[var(--color-bg-elevated)] animate-pulse" />
+          {[1, 2, 3, 4].map((i) => (
+            <SkeletonStatsCard key={i} />
           ))}
         </div>
       )}
@@ -92,7 +93,9 @@ export default function DebtRecoveryPage() {
         <p className="text-sm text-[var(--color-text-muted)] mb-4">Manage and track client balances</p>
 
         {clientsLoading ? (
-          <div className="h-96 rounded-2xl bg-[var(--color-bg-elevated)] animate-pulse" />
+          <div className="rounded-2xl border border-[var(--color-border-subtle)] bg-white overflow-hidden p-4">
+            <SkeletonTable rows={8} cols={6} />
+          </div>
         ) : clients ? (
           <ClientTable clients={clients} onClientClick={setSelectedClientId} />
         ) : null}

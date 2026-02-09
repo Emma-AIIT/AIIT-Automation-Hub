@@ -8,6 +8,7 @@ import { ActivityTimeline, type ActivityItem } from '@/components/dashboard/Acti
 import { AgentStatusCards, type AgentStatusItem } from '@/components/dashboard/AgentStatusCards';
 import { ModuleCard } from '@/components/dashboard/ModuleCard';
 import { VapiMetricsChart } from '@/components/dashboard/VapiMetricsChart';
+import { SkeletonStatsCard, SkeletonChart } from '@/components/ui/Skeleton';
 import { AGENT_CONFIGS } from '@/config/voice-agents';
 import type { VapiCall } from '@/types/vapi';
 import type { SupportTicket } from '@/types/tickets';
@@ -115,7 +116,7 @@ export default function AutomationsDashboardPage() {
   );
   const { data: tickets = [] } = api.tickets.getAll.useQuery({ limit: 10 }, { retry: false });
   const { data: ticketStats } = api.tickets.getStats.useQuery();
-  const { data: vapiMetrics } = api.vapi.getDailyMetrics.useQuery({ days: 30 }, { retry: false });
+  const { data: vapiMetrics, isLoading: vapiMetricsLoading } = api.vapi.getDailyMetrics.useQuery({ days: 30 }, { retry: false });
 
   const quoteCount = quoteData?.quotes?.length ?? 0;
   const wonCount = quoteData?.quotes?.filter((q) => q.status === 'Won').length ?? 0;
@@ -174,46 +175,62 @@ export default function AutomationsDashboardPage() {
             </svg>
           }
         />
-        <StatsCard
-          title="Outstanding Debt"
-          value={debtStats ? formatCurrency(debtStats.totalOutstanding) : debtStatsLoading ? '...' : '-'}
-          subtitle={debtStats ? `${debtStats.totalClients} clients` : 'Debt Recovery'}
-          icon={
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-          }
-        />
-        <StatsCard
-          title="At Risk"
-          value={debtStats?.atRisk ?? (debtStatsLoading ? '...' : '-')}
-          subtitle="1-3 weeks overdue"
-          icon={
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-          }
-        />
-        <StatsCard
-          title="VAPI Costs"
-          value={vapiMetrics ? formatCost(vapiMetrics.totalCost) : '...'}
-          subtitle={vapiMetrics ? `${vapiMetrics.totalCalls} calls (30d)` : 'Last 30 days'}
-          icon={
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-          }
-        />
+        {debtStatsLoading ? (
+          <SkeletonStatsCard />
+        ) : (
+          <StatsCard
+            title="Outstanding Debt"
+            value={debtStats ? formatCurrency(debtStats.totalOutstanding) : '-'}
+            subtitle={debtStats ? `${debtStats.totalClients} clients` : 'Debt Recovery'}
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
+            }
+          />
+        )}
+        {debtStatsLoading ? (
+          <SkeletonStatsCard />
+        ) : (
+          <StatsCard
+            title="At Risk"
+            value={debtStats?.atRisk ?? '-'}
+            subtitle="1-3 weeks overdue"
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            }
+          />
+        )}
+        {vapiMetricsLoading ? (
+          <SkeletonStatsCard />
+        ) : (
+          <StatsCard
+            title="VAPI Costs"
+            value={vapiMetrics ? formatCost(vapiMetrics.totalCost) : '-'}
+            subtitle={vapiMetrics ? `${vapiMetrics.totalCalls} calls (30d)` : 'Last 30 days'}
+            icon={
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
+            }
+          />
+        )}
       </div>
 
       {/* VAPI Metrics Charts */}
+      {vapiMetricsLoading && !vapiMetrics ? (
+        <SkeletonChart />
+      ) : (
       <VapiMetricsChart
         metrics={vapiMetrics?.metrics ?? []}
         totalCalls={vapiMetrics?.totalCalls ?? 0}
         totalCost={vapiMetrics?.totalCost ?? 0}
       />
+      )}
 
       {/* Main Grid - Activity Timeline + Agent Status */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:items-stretch">

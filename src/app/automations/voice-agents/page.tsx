@@ -5,6 +5,7 @@ import { api } from '@/trpc/react';
 import { AgentCard } from '@/components/modules/voice-agents/AgentCard';
 import { CallLogTable } from '@/components/modules/voice-agents/CallLogTable';
 import { CallDetailDrawer } from '@/components/modules/voice-agents/CallDetailDrawer';
+import { SkeletonStatsCard } from '@/components/ui/Skeleton';
 import type { AgentConfig } from '@/types/vapi';
 import { AGENT_CONFIGS } from '@/config/voice-agents';
 
@@ -114,24 +115,34 @@ export default function VoiceAgentsPage() {
         <div className="flex-1 min-w-0 space-y-4 md:space-y-6">
           {/* Stats Row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
-              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
-                Calls {selectedAgentName ? `· ${selectedAgentName}` : ''}
-              </p>
-              <p className="text-2xl md:text-3xl font-bold text-[var(--color-brand-navy)] mt-1">{stats?.totalCalls ?? 0}</p>
-            </div>
-            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
-              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Completed</p>
-              <p className="text-2xl md:text-3xl font-bold text-emerald-600 mt-1">{stats?.completedCalls ?? 0}</p>
-            </div>
-            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
-              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Failed</p>
-              <p className="text-2xl md:text-3xl font-bold text-rose-600 mt-1">{stats?.failedCalls ?? 0}</p>
-            </div>
-            <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
-              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Total Cost</p>
-              <p className="text-2xl md:text-3xl font-bold text-[var(--color-brand-navy)] mt-1">${(stats?.totalCost ?? 0).toFixed(2)}</p>
-            </div>
+            {callsLoading ? (
+              <>
+                {[1, 2, 3, 4].map((i) => (
+                  <SkeletonStatsCard key={i} />
+                ))}
+              </>
+            ) : (
+              <>
+                <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
+                  <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+                    Calls {selectedAgentName ? `· ${selectedAgentName}` : ''}
+                  </p>
+                  <p className="text-2xl md:text-3xl font-bold text-[var(--color-brand-navy)] mt-1">{stats?.totalCalls ?? 0}</p>
+                </div>
+                <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
+                  <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Completed</p>
+                  <p className="text-2xl md:text-3xl font-bold text-emerald-600 mt-1">{stats?.completedCalls ?? 0}</p>
+                </div>
+                <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
+                  <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Failed</p>
+                  <p className="text-2xl md:text-3xl font-bold text-rose-600 mt-1">{stats?.failedCalls ?? 0}</p>
+                </div>
+                <div className="bg-white rounded-xl border border-[var(--color-border-subtle)] p-4">
+                  <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Total Cost</p>
+                  <p className="text-2xl md:text-3xl font-bold text-[var(--color-brand-navy)] mt-1">${(stats?.totalCost ?? 0).toFixed(2)}</p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Call Log Table */}

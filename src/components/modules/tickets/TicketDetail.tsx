@@ -4,7 +4,7 @@ import { type FC, useState } from 'react';
 import { api } from '@/trpc/react';
 import { getWorkerColor } from '@/lib/worker-colors';
 import { format } from 'date-fns';
-import type { TicketStatus, TicketPriority } from '@/types/tickets';
+import type { TicketStatus, TicketPriority, TicketSource, TicketAttachment } from '@/types/tickets';
 
 interface Worker {
   id: string;
@@ -17,9 +17,117 @@ interface TicketDetailProps {
   workers?: Worker[] | null;
 }
 
+/** Escape special regex characters in a string */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Prepare email HTML for display:
+ * - If cidToUrl is provided, replace each src="cid:contentId" with the signed URL so inline images show in place.
+ * - Otherwise replace cid: refs with a placeholder so we don't show broken images.
+ */
+function sanitizeEmailHtmlForDisplay(html: string, cidToUrl?: Record<string, string>): string {
+  if (!html?.trim()) return html;
+  if (cidToUrl && Object.keys(cidToUrl).length > 0) {
+    let out = html;
+    for (const [contentId, url] of Object.entries(cidToUrl)) {
+      if (!url) continue;
+      const escaped = escapeRegex(contentId);
+      out = out.replace(
+        new RegExp(`(src\\s*=\\s*["']?)cid:${escaped}(["']?)`, 'gi'),
+        `$1${url}$2`
+      );
+    }
+    return out;
+  }
+  return html.replace(
+    /<img([^>]*)\ssrc\s*=\s*["']?\s*cid:[^"'\s>]+["']?([^>]*)>/gi,
+    '<span class="inline-image-placeholder" style="display:inline-block;min-width:80px;min-height:40px;background:#f0f0f0;color:#888;font-size:11px;vertical-align:middle;text-align:center;line-height:40px;border:1px solid #ddd;border-radius:4px;">[Inline image]</span>'
+  );
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const AttachmentRow: FC<{
+  attachment: TicketAttachment;
+  pdfPreviewId: string | null;
+  onPdfPreviewToggle: (id: string | null) => void;
+}> = ({ attachment, pdfPreviewId, onPdfPreviewToggle }) => {
+  const { data, isLoading } = api.tickets.getAttachmentUrl.useQuery(
+    { storage_path: attachment.storage_path },
+    { staleTime: 50 * 60 * 1000 } // 50 min (under 1hr expiry)
+  );
+  const isImage = attachment.file_type.startsWith('image/');
+  const isPdf = attachment.file_type === 'application/pdf';
+  const showPdfPreview = pdfPreviewId === attachment.id;
+
+  return (
+    <li className="flex flex-col gap-2 rounded-lg border border-[var(--color-border-subtle)] p-3 bg-gray-50">
+      <div className="flex items-center gap-3">
+        {isImage && data?.url && (
+          <img src={data.url} alt={attachment.file_name} className="h-12 w-12 object-cover rounded border border-gray-200" />
+        )}
+        {!isImage && (
+          <span className="flex h-12 w-12 items-center justify-center rounded border border-gray-200 bg-white text-[var(--color-text-muted)]">
+            {isPdf ? (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            ) : (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            )}
+          </span>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{attachment.file_name}</p>
+          <p className="text-xs text-[var(--color-text-muted)]">{formatFileSize(attachment.file_size)}</p>
+        </div>
+        {data?.url && (
+          <div className="flex items-center gap-2 shrink-0">
+            {isPdf && (
+              <button
+                type="button"
+                onClick={() => onPdfPreviewToggle(showPdfPreview ? null : attachment.id)}
+                className="px-2 py-1 rounded text-xs font-medium border border-[var(--color-border-default)] bg-white hover:bg-gray-50"
+              >
+                {showPdfPreview ? 'Hide' : 'Preview'}
+              </button>
+            )}
+            <a href={data.url} download={attachment.file_name} target="_blank" rel="noopener noreferrer" className="px-2 py-1 rounded text-xs font-medium bg-[var(--color-brand-orange)] text-white hover:opacity-90">
+              Download
+            </a>
+          </div>
+        )}
+        {isLoading && <span className="text-xs text-[var(--color-text-muted)]">Loading…</span>}
+      </div>
+      {isPdf && showPdfPreview && data?.url && (
+        <iframe title={attachment.file_name} src={data.url} className="w-full h-[400px] rounded border border-gray-200" />
+      )}
+    </li>
+  );
+};
+
+const SOURCE_LABELS: Record<TicketSource, string> = {
+  phone: 'Phone',
+  email: 'Email',
+  manual: 'Manual',
+  'walk-in': 'Walk-in',
+};
+
+const SOURCE_BADGE_CLASS: Record<TicketSource, string> = {
+  phone: 'bg-blue-100 text-blue-700 border-blue-200',
+  email: 'bg-violet-100 text-violet-700 border-violet-200',
+  manual: 'bg-gray-100 text-gray-700 border-gray-200',
+  'walk-in': 'bg-amber-100 text-amber-700 border-amber-200',
+};
+
 export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers: workersProp }) => {
   const { data: ticket, isLoading } = api.tickets.getById.useQuery({ id: ticketId });
   const [newNote, setNewNote] = useState('');
+  const [pdfPreviewId, setPdfPreviewId] = useState<string | null>(null);
 
   const utils = api.useUtils();
 
@@ -97,6 +205,24 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
     }
   };
 
+  // Inline email images: attachments with content_id map to cid: in HTML
+  const inlineAttachments =
+    ticket && 'attachments' in ticket && Array.isArray(ticket.attachments)
+      ? ticket.attachments.filter((a) => a.content_id)
+      : [];
+  const inlineStoragePaths = inlineAttachments.map((a) => a.storage_path);
+  const { data: inlineUrlsData } = api.tickets.getAttachmentUrls.useQuery(
+    { storage_paths: inlineStoragePaths },
+    { enabled: inlineStoragePaths.length > 0 && !!ticket }
+  );
+  const cidToUrl: Record<string, string> = {};
+  if (inlineUrlsData?.urls && inlineAttachments.length > 0) {
+    for (const att of inlineAttachments) {
+      const pair = inlineUrlsData.urls.find((u) => u.storage_path === att.storage_path);
+      if (pair?.url && att.content_id) cidToUrl[att.content_id] = pair.url;
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -138,12 +264,32 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
                 )}
               </div>
 
-              <div>
-                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Created</p>
-                <p className="text-sm text-[var(--color-brand-navy)] mt-1">
-                  {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
-                </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <div>
+                  <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Created</p>
+                  <p className="text-sm text-[var(--color-brand-navy)] mt-1">
+                    {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
+                  </p>
+                </div>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${SOURCE_BADGE_CLASS[ticket.source ?? 'manual']}`}>
+                  {SOURCE_LABELS[ticket.source ?? 'manual']}
+                </span>
               </div>
+
+              {ticket.source === 'email' && (ticket.email_subject ?? ticket.email_cc ?? ticket.email_bcc) && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Email</p>
+                  {ticket.email_subject && (
+                    <p className="text-sm text-[var(--color-brand-navy)]"><span className="text-[var(--color-text-muted)]">Subject:</span> {ticket.email_subject}</p>
+                  )}
+                  {ticket.email_cc && (
+                    <p className="text-sm text-[var(--color-text-secondary)]"><span className="text-[var(--color-text-muted)]">CC:</span> {ticket.email_cc}</p>
+                  )}
+                  {ticket.email_bcc && (
+                    <p className="text-sm text-[var(--color-text-secondary)]"><span className="text-[var(--color-text-muted)]">BCC:</span> {ticket.email_bcc}</p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Status</p>
@@ -243,10 +389,34 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
             {/* Inquiry */}
             <div>
               <h3 className="text-sm font-semibold text-[var(--color-brand-navy)] mb-3">Inquiry</h3>
-              <div className="bg-gray-50 rounded-xl p-4 text-sm text-[var(--color-text-secondary)]">
-                {ticket.inquiry}
-              </div>
+              {ticket.source === 'email' && /^\s*</.test(ticket.inquiry) ? (
+                <div className="bg-gray-50 rounded-xl overflow-hidden border border-[var(--color-border-subtle)]">
+                  <iframe
+                    title="Email body"
+                    sandbox="allow-same-origin"
+                    srcDoc={sanitizeEmailHtmlForDisplay(ticket.inquiry, Object.keys(cidToUrl).length > 0 ? cidToUrl : undefined)}
+                    className="w-full min-h-[200px] max-h-[400px] border-0"
+                    style={{ height: 'min(400px, 60vh)' }}
+                  />
+                </div>
+              ) : (
+                <div className="bg-gray-50 rounded-xl p-4 text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap">
+                  {ticket.inquiry}
+                </div>
+              )}
             </div>
+
+            {/* Attachments */}
+            {'attachments' in ticket && Array.isArray(ticket.attachments) && ticket.attachments.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--color-brand-navy)] mb-3">Attachments</h3>
+                <ul className="space-y-3">
+                  {ticket.attachments.map((att) => (
+                    <AttachmentRow key={att.id} attachment={att} pdfPreviewId={pdfPreviewId} onPdfPreviewToggle={setPdfPreviewId} />
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Summary */}
             {ticket.summary && (
