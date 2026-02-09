@@ -2,14 +2,19 @@
 
 import { api } from '@/trpc/react';
 import { StatsCard } from '@/components/dashboard/StatsCard';
+import { SkeletonQuoteStats } from '@/components/ui/Skeleton';
 
 export function QuoteStats() {
-  const { data } = api.quotePipeline.getRows.useQuery();
+  const { data, isLoading } = api.quotePipeline.getRows.useQuery();
   const quotes = data?.quotes ?? [];
 
   const totalQuotes = quotes.length;
   const activeQuotes = quotes.filter((q) => q.status === 'Quote').length;
   const wonQuotes = quotes.filter((q) => q.status === 'Won').length;
+
+  if (isLoading) {
+    return <SkeletonQuoteStats />;
+  }
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">

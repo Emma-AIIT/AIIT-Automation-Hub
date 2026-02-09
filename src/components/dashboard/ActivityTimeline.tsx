@@ -1,6 +1,7 @@
 'use client';
 
 import { type FC } from 'react';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 export interface ActivityItem {
   id: string;
@@ -71,13 +72,14 @@ export const ActivityTimeline: FC<ActivityTimelineProps> = ({ activities = [], i
       </div>
       {isLoading ? (
         <div className="space-y-4">
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="flex items-start gap-3">
-              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[var(--color-bg-hover)] animate-pulse" />
+              <Skeleton className="flex-shrink-0 w-8 h-8 rounded-lg" />
               <div className="flex-1 min-w-0 space-y-2">
-                <div className="h-4 w-32 bg-[var(--color-bg-hover)] rounded animate-pulse" />
-                <div className="h-3 w-full max-w-[200px] bg-[var(--color-bg-hover)] rounded animate-pulse" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-full max-w-[200px]" />
               </div>
+              <Skeleton className="flex-shrink-0 h-3 w-12" />
             </div>
           ))}
         </div>

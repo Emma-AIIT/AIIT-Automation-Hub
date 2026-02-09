@@ -6,6 +6,7 @@ import { api } from '@/trpc/react';
 import { AvatarInitials } from '@/components/shared/AvatarInitials';
 import { QuoteFilters } from './QuoteFilters';
 import { QuoteDetailDrawer } from './QuoteDetailDrawer';
+import { SkeletonTable } from '@/components/ui/Skeleton';
 
 const PAGE_SIZE_OPTIONS = [6, 10, 25, 50] as const;
 const DEFAULT_PAGE_SIZE = 10;
@@ -258,8 +259,8 @@ export function QuoteTable() {
       <div className="relative overflow-hidden rounded-2xl border border-[var(--color-border-subtle)] bg-gradient-to-b from-[var(--color-bg-card)] to-[var(--color-bg-secondary)]">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[var(--color-border-strong)] to-transparent" />
         {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          <div className="p-4 md:p-6">
+            <SkeletonTable rows={8} cols={7} />
           </div>
         ) : isError ? (
           <div className="py-12 text-center text-sm text-red-600 dark:text-red-400">

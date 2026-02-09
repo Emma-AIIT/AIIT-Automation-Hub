@@ -4,6 +4,7 @@ import { type FC } from 'react';
 import { format } from 'date-fns';
 import type { VapiCall } from '@/types/vapi';
 import { getEffectiveCallStatus } from '@/lib/vapi-call-status';
+import { SkeletonTable } from '@/components/ui/Skeleton';
 
 interface CallLogTableProps {
   calls: VapiCall[];
@@ -104,7 +105,11 @@ function CallTypeCell({ type }: { type: VapiCall['type'] }) {
 
 export const CallLogTable: FC<CallLogTableProps> = ({ calls, loading, onCallClick, assistantNameMap }) => {
   if (loading) {
-    return <div className="text-center py-12 text-[var(--color-text-muted)]">Loading calls...</div>;
+    return (
+      <div className="overflow-x-auto">
+        <SkeletonTable rows={6} cols={8} />
+      </div>
+    );
   }
 
   if (calls.length === 0) {
