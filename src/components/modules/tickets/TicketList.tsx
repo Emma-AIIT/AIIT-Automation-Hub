@@ -17,7 +17,7 @@ interface TicketListProps {
   tickets: SupportTicket[];
   loading: boolean;
   workers: Worker[];
-  statusFilter: TicketStatus | 'all';
+  statusFilter: TicketStatus | 'all' | 'unassigned';
   onTicketClick: (id: string) => void;
   onMutationComplete?: (ticketId: string) => void;
 }
@@ -72,21 +72,21 @@ const SourceIcon: FC<{ source: TicketSource }> = ({ source }) => {
 const PriorityDisplay: FC<{ priority: string | null }> = ({ priority }) => {
   if (priority === 'high') {
     return (
-      <div className="flex items-center gap-0.5 text-red-600" title="High Priority">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+      <div className="flex items-center justify-center gap-1.5" title="High Priority">
+        <span className="h-2 w-2 rounded-full bg-red-500" />
+        <span className="text-xs font-medium text-red-600">High</span>
       </div>
     );
   }
   if (priority === 'low') {
     return (
-      <div className="flex items-center text-blue-600" title="Low Priority">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
+      <div className="flex items-center justify-center gap-1.5" title="Low Priority">
+        <span className="h-2 w-2 rounded-full bg-blue-500" />
+        <span className="text-xs font-medium text-blue-600">Low</span>
       </div>
     );
   }
-  return <span className="text-gray-400">—</span>;
+  return <span className="text-gray-300">—</span>;
 };
 
 const STATUS_OPTIONS: TicketStatus[] = ['open', 'in-progress', 'resolved'];
@@ -98,13 +98,11 @@ interface TicketRowProps {
   onOpenStatusToggle: (ticketId: string) => void;
   updateStatusPending: boolean;
   assignPending: boolean;
-  deletePending: boolean;
   isSelected: boolean;
   onToggleSelect: (ticketId: string, checked: boolean) => void;
   onTicketClick: (id: string) => void;
   onStatusSelect: (ticketId: string, status: TicketStatus) => void;
   onAssignChange: (ticketId: string, assignedTo: string | null) => void;
-  onDelete: (e: React.MouseEvent, ticketId: string) => void;
 }
 
 const TicketRow = memo(function TicketRow({
@@ -114,13 +112,11 @@ const TicketRow = memo(function TicketRow({
   onOpenStatusToggle,
   updateStatusPending,
   assignPending,
-  deletePending,
   isSelected,
   onToggleSelect,
   onTicketClick,
   onStatusSelect,
   onAssignChange,
-  onDelete,
 }: TicketRowProps) {
   const assignedTo = ticket.assigned_to ?? '';
   const color = assignedTo ? getWorkerColor(assignedTo) : null;
@@ -129,7 +125,7 @@ const TicketRow = memo(function TicketRow({
   return (
     <tr
       onClick={() => onTicketClick(ticket.id)}
-      className={`border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors ${
+      className={`border-b border-[var(--color-border-subtle)] last:border-b-0 even:bg-gray-50/50 hover:bg-gray-100/60 cursor-pointer transition-colors ${
         ticket.status === 'open' ? getOpenAgeBorderColor(ticket.created_at) : ''
       } ${isSelected ? 'bg-[var(--color-accent-light)]/30' : ''}`}
     >
@@ -142,23 +138,17 @@ const TicketRow = memo(function TicketRow({
           aria-label={`Select ticket ${ticket.caller_name}`}
         />
       </td>
-      <td className="py-3 px-4 text-sm text-[var(--color-text-primary)]">
-        {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
-      </td>
-      <td className="py-3 px-4" title={ticket.source === 'phone' ? 'Phone' : ticket.source === 'email' ? 'Email' : ticket.source === 'manual' ? 'Manual' : 'Walk-in'}>
-        <SourceIcon source={ticket.source ?? 'manual'} />
-      </td>
-      <td className="py-3 px-4">
+      <td className="py-3 px-4 text-center">
         <PriorityDisplay priority={ticket.priority} />
       </td>
       <td className="py-3 px-4 text-sm font-medium text-[var(--color-text-primary)]">
         {ticket.caller_name}
       </td>
+      <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-sm" title={ticket.summary ?? undefined}>
+        <span className="line-clamp-2">{ticket.summary ?? '-'}</span>
+      </td>
       <td className="py-3 px-4 text-sm text-[var(--color-text-muted)]">
         {ticket.caller_business ?? '-'}
-      </td>
-      <td className="py-3 px-4 text-sm text-[var(--color-text-primary)] max-w-xs truncate" title={ticket.summary ?? undefined}>
-        {ticket.summary ?? '-'}
       </td>
       <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
         <select
@@ -169,7 +159,7 @@ const TicketRow = memo(function TicketRow({
             color ? `border-l-4 border ${color.bg} ${color.text} ${color.border}` : 'border border-[var(--color-border-default)] bg-white'
           }`}
         >
-          <option value="">—</option>
+          <option value="">Unassigned</option>
           {workers.map((w) => (
             <option key={w.id} value={w.name}>
               {w.name}
@@ -177,13 +167,13 @@ const TicketRow = memo(function TicketRow({
           ))}
         </select>
       </td>
-      <td className="py-3 px-4 relative" onClick={(e) => e.stopPropagation()}>
-        <div className="relative">
+      <td className="py-3 px-4 relative text-center" onClick={(e) => e.stopPropagation()}>
+        <div className="relative inline-block">
           <button
             type="button"
             onClick={() => onOpenStatusToggle(ticket.id)}
             disabled={updateStatusPending}
-            className={`inline-flex px-2 py-1 rounded-md text-xs font-medium transition-colors hover:opacity-90 ${getStatusColor(ticket.status)}`}
+            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors hover:opacity-90 ${getStatusColor(ticket.status)}`}
           >
             {ticket.status.replace('-', ' ')}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-1 inline">
@@ -215,24 +205,13 @@ const TicketRow = memo(function TicketRow({
           )}
         </div>
       </td>
-      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => onTicketClick(ticket.id)}
-            className="text-sm text-[var(--color-brand-orange)] hover:underline font-medium"
-          >
-            View
-          </button>
-          <button
-            type="button"
-            onClick={(e) => onDelete(e, ticket.id)}
-            disabled={deletePending}
-            className="text-sm text-red-600 hover:text-red-700 hover:underline font-medium disabled:opacity-50"
-          >
-            Delete
-          </button>
+      <td className="py-3 px-4" title={ticket.source === 'phone' ? 'Phone' : ticket.source === 'email' ? 'Email' : ticket.source === 'manual' ? 'Manual' : 'Walk-in'}>
+        <div className="flex justify-center">
+          <SourceIcon source={ticket.source ?? 'manual'} />
         </div>
+      </td>
+      <td className="py-3 px-4 text-sm text-[var(--color-text-muted)] text-center whitespace-nowrap">
+        {format(new Date(ticket.created_at), 'h:mm a, dd MMM')}
       </td>
     </tr>
   );
@@ -248,6 +227,9 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
 }) {
   const [openStatusId, setOpenStatusId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pendingPriority, setPendingPriority] = useState<'high' | 'low' | 'none' | ''>('');
+  const [pendingAssign, setPendingAssign] = useState<string>('');
+  const [pendingStatus, setPendingStatus] = useState<string>('');
   const utils = api.useUtils();
 
   const toggleSelect = useCallback((ticketId: string, checked: boolean) => {
@@ -300,50 +282,6 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
     },
     onSettled: (_data, _err, vars) => {
       onMutationComplete?.(vars.id);
-      void utils.tickets.getAll.invalidate({ status: statusFilter });
-      void utils.tickets.getStats.invalidate();
-    },
-  });
-
-  const deleteMutation = api.tickets.delete.useMutation({
-    onMutate: async ({ id }) => {
-      await utils.tickets.getAll.cancel({ status: statusFilter });
-      await utils.tickets.getStats.cancel();
-      const prevTickets = utils.tickets.getAll.getData({ status: statusFilter });
-      const prevStats = utils.tickets.getStats.getData();
-
-      const ticket = prevTickets?.find((t) => t.id === id);
-      const wasOpenUnassigned =
-        ticket?.status === 'open' &&
-        (!ticket.assigned_to || String(ticket.assigned_to).trim() === '');
-
-      utils.tickets.getAll.setData({ status: statusFilter }, (old) =>
-        old ? old.filter((t) => t.id !== id) : old
-      );
-
-      if (prevStats && ticket) {
-        const updates: Record<string, number> = {
-          total: Math.max(0, prevStats.total - 1),
-          open: ticket.status === 'open' ? Math.max(0, prevStats.open - 1) : prevStats.open,
-          inProgress: ticket.status === 'in-progress' ? Math.max(0, prevStats.inProgress - 1) : prevStats.inProgress,
-          resolved: ticket.status === 'resolved' ? Math.max(0, prevStats.resolved - 1) : prevStats.resolved,
-          unassigned: wasOpenUnassigned ? Math.max(0, prevStats.unassigned - 1) : prevStats.unassigned,
-        };
-        utils.tickets.getStats.setData(undefined, { ...prevStats, ...updates });
-      }
-
-      return { prevTickets, prevStats };
-    },
-    onError: (err, _vars, ctx) => {
-      if (ctx?.prevTickets) {
-        utils.tickets.getAll.setData({ status: statusFilter }, ctx.prevTickets);
-      }
-      if (ctx?.prevStats) {
-        utils.tickets.getStats.setData(undefined, ctx.prevStats);
-      }
-      toast.error(err.message ?? 'Failed to delete ticket');
-    },
-    onSuccess: () => {
       void utils.tickets.getAll.invalidate({ status: statusFilter });
       void utils.tickets.getStats.invalidate();
     },
@@ -460,6 +398,36 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
     [updateStatusMutation]
   );
 
+  const bulkStatusMutation = api.tickets.bulkUpdateStatus.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.updated} ticket(s) updated`);
+      setSelectedIds(new Set());
+      void utils.tickets.getAll.invalidate({ status: statusFilter });
+      void utils.tickets.getStats.invalidate();
+    },
+    onError: (err) => toast.error(err.message ?? 'Failed to update status'),
+  });
+
+  const bulkAssignMutation = api.tickets.bulkAssignWorker.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.updated} ticket(s) assigned`);
+      setSelectedIds(new Set());
+      void utils.tickets.getAll.invalidate({ status: statusFilter });
+      void utils.tickets.getStats.invalidate();
+    },
+    onError: (err) => toast.error(err.message ?? 'Failed to assign'),
+  });
+
+  const bulkPriorityMutation = api.tickets.bulkUpdatePriority.useMutation({
+    onSuccess: (data) => {
+      toast.success(`${data.updated} ticket(s) updated`);
+      setSelectedIds(new Set());
+      void utils.tickets.getAll.invalidate({ status: statusFilter });
+      void utils.tickets.getStats.invalidate();
+    },
+    onError: (err) => toast.error(err.message ?? 'Failed to update priority'),
+  });
+
   const handleAssignChange = useCallback(
     (ticketId: string, assignedTo: string | null) => {
       assignWorkerMutation.mutate({ id: ticketId, assigned_to: assignedTo || null });
@@ -467,20 +435,10 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
     [assignWorkerMutation]
   );
 
-  const handleDelete = useCallback(
-    (e: React.MouseEvent, ticketId: string) => {
-      e.stopPropagation();
-      if (window.confirm('Delete this ticket? This cannot be undone.')) {
-        deleteMutation.mutate({ id: ticketId });
-      }
-    },
-    [deleteMutation]
-  );
-
   if (loading) {
     return (
       <div className="p-4 md:p-6">
-        <SkeletonTable rows={6} cols={9} />
+        <SkeletonTable rows={6} cols={8} />
       </div>
     );
   }
@@ -502,32 +460,113 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
 
   return (
     <div className="space-y-3">
-      {someSelected && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-[var(--color-accent-light)]/50 rounded-lg border border-[var(--color-border-subtle)]">
-          <span className="text-sm font-medium text-[var(--color-brand-navy)]">
-            {selectedIds.size} selected
-          </span>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="text-sm text-[var(--color-text-secondary)] hover:underline"
-          >
-            Clear selection
-          </button>
-          <button
-            type="button"
-            onClick={handleBulkDelete}
-            disabled={deleteManyMutation.isPending}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-          >
-            {deleteManyMutation.isPending ? 'Deleting…' : `Delete selected (${selectedIds.size})`}
-          </button>
-        </div>
-      )}
+      {someSelected && (() => {
+        const hasPendingChanges = pendingPriority !== '' || pendingAssign !== '' || pendingStatus !== '';
+        const isBulkPending = bulkPriorityMutation.isPending || bulkAssignMutation.isPending || bulkStatusMutation.isPending;
+
+        const handleConfirm = async () => {
+          const ids = Array.from(selectedIds);
+          const promises: Promise<unknown>[] = [];
+          if (pendingPriority !== '') {
+            const val = pendingPriority === 'none' ? null : pendingPriority;
+            promises.push(bulkPriorityMutation.mutateAsync({ ids, priority: val }));
+          }
+          if (pendingAssign !== '') {
+            const val = pendingAssign === '__unassign__' ? null : pendingAssign;
+            promises.push(bulkAssignMutation.mutateAsync({ ids, assigned_to: val }));
+          }
+          if (pendingStatus !== '') {
+            promises.push(bulkStatusMutation.mutateAsync({ ids, status: pendingStatus as TicketStatus }));
+          }
+          await Promise.all(promises);
+          setPendingPriority('');
+          setPendingAssign('');
+          setPendingStatus('');
+        };
+
+        const handleClear = () => {
+          setSelectedIds(new Set());
+          setPendingPriority('');
+          setPendingAssign('');
+          setPendingStatus('');
+        };
+
+        return (
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-[var(--color-accent-light)]/50 rounded-lg border border-[var(--color-border-subtle)]">
+            <span className="text-sm font-medium text-[var(--color-brand-navy)] mr-1">
+              {selectedIds.size} selected
+            </span>
+            <div className="h-5 w-px bg-[var(--color-border-default)]" />
+
+            {/* Bulk Priority */}
+            <select
+              value={pendingPriority}
+              onChange={(e) => setPendingPriority(e.target.value as typeof pendingPriority)}
+              className={`px-2.5 py-1.5 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] ${pendingPriority ? 'border-[var(--color-brand-orange)] text-[var(--color-brand-orange)] font-medium' : 'border-[var(--color-border-default)] text-[var(--color-text-secondary)]'}`}
+            >
+              <option value="">Priority...</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+              <option value="none">None</option>
+            </select>
+
+            {/* Bulk Assign */}
+            <select
+              value={pendingAssign}
+              onChange={(e) => setPendingAssign(e.target.value)}
+              className={`px-2.5 py-1.5 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] ${pendingAssign ? 'border-[var(--color-brand-orange)] text-[var(--color-brand-orange)] font-medium' : 'border-[var(--color-border-default)] text-[var(--color-text-secondary)]'}`}
+            >
+              <option value="">Assign to...</option>
+              <option value="__unassign__">Unassigned</option>
+              {workers.map((w) => (
+                <option key={w.id} value={w.name}>{w.name}</option>
+              ))}
+            </select>
+
+            {/* Bulk Status */}
+            <select
+              value={pendingStatus}
+              onChange={(e) => setPendingStatus(e.target.value)}
+              className={`px-2.5 py-1.5 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] ${pendingStatus ? 'border-[var(--color-brand-orange)] text-[var(--color-brand-orange)] font-medium' : 'border-[var(--color-border-default)] text-[var(--color-text-secondary)]'}`}
+            >
+              <option value="">Status...</option>
+              <option value="open">Open</option>
+              <option value="in-progress">In Progress</option>
+              <option value="resolved">Resolved</option>
+            </select>
+
+            <div className="flex-1" />
+
+            <button
+              type="button"
+              onClick={handleClear}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleConfirm()}
+              disabled={!hasPendingChanges || isBulkPending}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isBulkPending ? 'Applying…' : 'Confirm'}
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={deleteManyMutation.isPending}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              {deleteManyMutation.isPending ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        );
+      })()}
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-[var(--color-border-subtle)]">
+            <tr className="border-b border-[var(--color-border-subtle)] bg-gray-50/80">
               <th className="text-left py-3 px-4 w-10" onClick={(e) => e.stopPropagation()}>
                 <input
                   type="checkbox"
@@ -540,15 +579,14 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
                   aria-label="Select all tickets"
                 />
               </th>
-              <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Created</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Source</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Priority</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Customer</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Business</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Summary</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Assigned To</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Status</th>
-            <th className="text-left py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Actions</th>
+              <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Priority</th>
+            <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Customer</th>
+            <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Summary</th>
+            <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Business</th>
+            <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Assigned To</th>
+            <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Status</th>
+            <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Source</th>
+            <th className="text-center py-3 px-4 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Created</th>
           </tr>
         </thead>
           <tbody>
@@ -561,13 +599,11 @@ export const TicketList: FC<TicketListProps> = memo(function TicketList({
                 onOpenStatusToggle={(id) => setOpenStatusId((current) => (current === id ? null : id))}
                 updateStatusPending={updateStatusMutation.isPending}
                 assignPending={assignWorkerMutation.isPending}
-                deletePending={deleteMutation.isPending}
                 isSelected={selectedIds.has(ticket.id)}
                 onToggleSelect={toggleSelect}
                 onTicketClick={onTicketClick}
                 onStatusSelect={handleStatusSelect}
                 onAssignChange={handleAssignChange}
-                onDelete={handleDelete}
               />
             ))}
           </tbody>
