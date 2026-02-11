@@ -1,6 +1,7 @@
 'use client';
 
-import { type FC, memo, useState, useCallback } from 'react';
+import { type FC, memo, useState, useCallback, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { format, differenceInDays } from 'date-fns';
 import toast from 'react-hot-toast';
 import { api } from '@/trpc/react';
@@ -121,6 +122,58 @@ const TicketRow = memo(function TicketRow({
   const assignedTo = ticket.assigned_to ?? '';
   const color = assignedTo ? getWorkerColor(assignedTo) : null;
   const isStatusOpen = openStatusId === ticket.id;
+  const statusButtonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
+
+  const DROPDOWN_HEIGHT = 120; // ~3 options
+  useLayoutEffect(() => {
+    if (!isStatusOpen || !statusButtonRef.current) {
+      setDropdownPosition(null);
+      return;
+    }
+    const rect = statusButtonRef.current.getBoundingClientRect();
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600;
+    const spaceBelow = viewportHeight - rect.bottom - 8;
+    const openAbove = spaceBelow < DROPDOWN_HEIGHT;
+    const top = openAbove
+      ? Math.max(8, rect.top - DROPDOWN_HEIGHT - 4)
+      : rect.bottom + 4;
+    setDropdownPosition({ top, left: rect.left });
+  }, [isStatusOpen]);
+
+  const statusDropdownPortal =
+    isStatusOpen &&
+    dropdownPosition &&
+    typeof document !== 'undefined' &&
+    createPortal(
+      <>
+        <div
+          className="fixed inset-0 z-40"
+          aria-hidden
+          onClick={() => onOpenStatusToggle(ticket.id)}
+        />
+        <div
+          className="fixed z-50 min-w-[140px] max-h-[min(200px,50vh)] overflow-y-auto rounded-lg border border-[var(--color-border-subtle)] bg-white shadow-lg py-1"
+          style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
+          role="menu"
+        >
+          {STATUS_OPTIONS.map((status) => (
+            <button
+              key={status}
+              type="button"
+              role="menuitem"
+              onClick={() => onStatusSelect(ticket.id, status)}
+              className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg ${
+                ticket.status === status ? 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)] font-medium' : 'text-[var(--color-text-secondary)]'
+              }`}
+            >
+              {status.replace('-', ' ')}
+            </button>
+          ))}
+        </div>
+      </>,
+      document.body
+    );
 
   return (
     <tr
@@ -167,42 +220,23 @@ const TicketRow = memo(function TicketRow({
           ))}
         </select>
       </td>
-      <td className="py-3 px-4 relative text-center" onClick={(e) => e.stopPropagation()}>
-        <div className="relative inline-block">
+      <td className="py-3 px-4 text-center align-middle" onClick={(e) => e.stopPropagation()}>
+        <div className="inline-block">
           <button
+            ref={statusButtonRef}
             type="button"
             onClick={() => onOpenStatusToggle(ticket.id)}
             disabled={updateStatusPending}
             className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium transition-colors hover:opacity-90 ${getStatusColor(ticket.status)}`}
+            aria-haspopup="true"
+            aria-expanded={isStatusOpen}
           >
             {ticket.status.replace('-', ' ')}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml-1 inline">
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
-          {isStatusOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-10"
-                aria-hidden
-                onClick={() => onOpenStatusToggle(ticket.id)}
-              />
-              <div className="absolute left-0 top-full mt-1 z-20 min-w-[140px] rounded-lg border border-[var(--color-border-subtle)] bg-white shadow-lg py-1">
-                {STATUS_OPTIONS.map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() => onStatusSelect(ticket.id, status)}
-                    className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg ${
-                      ticket.status === status ? 'bg-[var(--color-accent-light)] text-[var(--color-brand-orange)] font-medium' : 'text-[var(--color-text-secondary)]'
-                    }`}
-                  >
-                    {status.replace('-', ' ')}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          {statusDropdownPortal}
         </div>
       </td>
       <td className="py-3 px-4" title={ticket.source === 'phone' ? 'Phone' : ticket.source === 'email' ? 'Email' : ticket.source === 'manual' ? 'Manual' : 'Walk-in'}>

@@ -1,7 +1,10 @@
 import "@/styles/globals.css";
 import { type Metadata } from "next";
+import { DM_Sans } from "next/font/google";
 import { TRPCReactProvider } from "@/trpc/react";
 import { ToastProvider } from "@/components/ToastProvider";
+
+const dmSans = DM_Sans({ subsets: ["latin"] });
 
 const siteUrl =
   process.env.VERCEL_URL
@@ -42,15 +45,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="font-sans antialiased">
+      <body className={`${dmSans.className} antialiased`}>
         <TRPCReactProvider>
           {children}
           <ToastProvider />
