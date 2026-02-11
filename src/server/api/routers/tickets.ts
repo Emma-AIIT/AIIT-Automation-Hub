@@ -3,7 +3,7 @@ import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { env } from "~/env";
-import type { SupportTicket, TicketAttachment } from "@/types/tickets";
+import type { SupportTicket, TicketAttachment, TicketReply } from "@/types/tickets";
 
 export const ticketsRouter = createTRPCRouter({
   getAll: publicProcedure
@@ -413,6 +413,125 @@ export const ticketsRouter = createTRPCRouter({
       tickets_processed: ticketsProcessed,
     };
   }),
+
+  getReplies: publicProcedure
+    .input(z.object({ ticketId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("ticket_replies")
+        .select("*")
+        .eq("ticket_id", input.ticketId)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as TicketReply[];
+    }),
+
+  sendReply: publicProcedure
+    .input(z.object({
+      ticketId: z.string().uuid(),
+      body: z.string().min(1),
+      bodyPlain: z.string().optional(),
+      cc: z.string().optional(),
+      sentBy: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+
+      const { data: ticket, error: ticketError } = await supabase
+        .from("support_tickets")
+        .select("id, caller_email, email_subject, email_message_id, source")
+        .eq("id", input.ticketId)
+        .single();
+
+      if (ticketError || !ticket) throw new Error("Ticket not found");
+      if ((ticket as { source: string }).source !== "email") {
+        throw new Error("Replies are only supported for email tickets");
+      }
+      const t = ticket as { caller_email: string | null; email_subject: string | null; email_message_id: string | null };
+      if (!t.caller_email?.trim()) {
+        throw new Error("Ticket has no customer email to reply to");
+      }
+
+      const { data: existingReplies } = await supabase
+        .from("ticket_replies")
+        .select("message_id")
+        .eq("ticket_id", input.ticketId)
+        .order("created_at", { ascending: false });
+
+      const refs = (existingReplies ?? []) as { message_id: string | null }[];
+      const referencesList: string[] = [];
+      if (t.email_message_id) referencesList.push(t.email_message_id);
+      for (const r of refs) {
+        if (r.message_id && !referencesList.includes(r.message_id)) referencesList.push(r.message_id);
+      }
+      const inReplyTo = refs[0]?.message_id ?? t.email_message_id ?? undefined;
+      const referencesHeader = referencesList.length > 0 ? referencesList.join(" ") : undefined;
+
+      const messageId = `<ticket-${input.ticketId}-${Date.now()}@reply.aiit>`;
+
+      const { data: reply, error: insertError } = await supabase
+        .from("ticket_replies")
+        .insert({
+          ticket_id: input.ticketId,
+          direction: "outbound",
+          body: input.body,
+          body_plain: input.bodyPlain ?? null,
+          from_email: null,
+          to_email: t.caller_email.trim(),
+          cc: input.cc?.trim() || null,
+          subject: t.email_subject ? `Re: ${t.email_subject.replace(/^Re:\s*/i, "")}` : null,
+          message_id: messageId,
+          in_reply_to: inReplyTo ?? null,
+          references_header: referencesHeader ?? null,
+          sent_by: input.sentBy?.trim() || null,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      const webhookUrl = env.MAKE_SEND_EMAIL_WEBHOOK_URL;
+      if (webhookUrl) {
+        try {
+          const res = await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticket_id: input.ticketId,
+              reply_id: (reply as TicketReply).id,
+              to: t.caller_email.trim(),
+              subject: t.email_subject ? `Re: ${t.email_subject.replace(/^Re:\s*/i, "")}` : "Re: Your support request",
+              body: input.body,
+              body_plain: input.bodyPlain ?? undefined,
+              cc: input.cc?.trim() || undefined,
+              message_id: messageId,
+              in_reply_to: inReplyTo,
+              references: referencesHeader,
+            }),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            console.error("Make.com send-email webhook error:", res.status, text);
+            throw new Error(`Failed to send email: ${res.status}`);
+          }
+        } catch (err) {
+          console.error("Make.com send-email webhook:", err);
+          throw err instanceof Error ? err : new Error("Failed to send email");
+        }
+      }
+
+      const { error: updateError } = await supabase
+        .from("support_tickets")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", input.ticketId);
+
+      if (updateError) {
+        // non-fatal
+      }
+
+      return reply as TicketReply;
+    }),
 
   getStats: publicProcedure.query(async () => {
     const supabase = await createClient();

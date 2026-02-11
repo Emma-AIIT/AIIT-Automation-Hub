@@ -27,6 +27,7 @@ export interface SupportTicket {
   email_cc: string | null;
   email_bcc: string | null;
   email_message_id: string | null;
+  conversation_id: string | null;
 }
 
 export interface TicketAttachment {
@@ -37,5 +38,24 @@ export interface TicketAttachment {
   file_size: number;
   storage_path: string;
   content_id: string | null;
+  created_at: string;
+}
+
+export type TicketReplyDirection = 'inbound' | 'outbound';
+
+export interface TicketReply {
+  id: string;
+  ticket_id: string;
+  direction: TicketReplyDirection;
+  body: string;
+  body_plain: string | null;
+  from_email: string | null;
+  to_email: string | null;
+  cc: string | null;
+  subject: string | null;
+  message_id: string | null;
+  in_reply_to: string | null;
+  references_header: string | null;
+  sent_by: string | null;
   created_at: string;
 }

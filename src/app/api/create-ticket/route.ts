@@ -24,6 +24,7 @@ const CreateTicketSchema = z.object({
   email_cc: z.string().optional(),
   email_bcc: z.string().optional(),
   email_message_id: z.string().optional(),
+  conversation_id: z.string().optional(),
   attachments: z.array(AttachmentSchema).optional(),
 });
 
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
         email_cc: data.email_cc ?? null,
         email_bcc: data.email_bcc ?? null,
         email_message_id: data.email_message_id ?? null,
+        conversation_id: data.conversation_id ?? null,
       })
       .select()
       .single();
