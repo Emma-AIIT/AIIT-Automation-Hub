@@ -8,7 +8,7 @@ import type { SupportTicket, TicketAttachment } from "@/types/tickets";
 export const ticketsRouter = createTRPCRouter({
   getAll: publicProcedure
     .input(z.object({
-      status: z.enum(['all', 'open', 'in-progress', 'resolved']).default('all'),
+      status: z.enum(['all', 'open', 'in-progress', 'resolved', 'unassigned']).default('all'),
       limit: z.number().default(50),
     }))
     .query(async ({ input }) => {
@@ -20,7 +20,9 @@ export const ticketsRouter = createTRPCRouter({
         .order('created_at', { ascending: false })
         .limit(input.limit);
 
-      if (input.status !== 'all') {
+      if (input.status === 'unassigned') {
+        query = query.or('assigned_to.is.null,assigned_to.eq.');
+      } else if (input.status !== 'all') {
         query = query.eq('status', input.status);
       }
 
@@ -179,6 +181,62 @@ export const ticketsRouter = createTRPCRouter({
       }
 
       return { deleted, errors: errors.length > 0 ? errors : undefined };
+    }),
+
+  bulkUpdateStatus: publicProcedure
+    .input(z.object({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+      status: z.enum(['open', 'in-progress', 'resolved']),
+    }))
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+      const now = new Date().toISOString();
+      const updates: Record<string, unknown> = {
+        status: input.status,
+        updated_at: now,
+      };
+      if (input.status === 'resolved') {
+        updates.resolved_at = now;
+      }
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .update(updates)
+        .in('id', input.ids)
+        .select('id');
+      if (error) throw error;
+      return { updated: data?.length ?? 0 };
+    }),
+
+  bulkAssignWorker: publicProcedure
+    .input(z.object({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+      assigned_to: z.string().nullable(),
+    }))
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .update({ assigned_to: input.assigned_to, updated_at: new Date().toISOString() })
+        .in('id', input.ids)
+        .select('id');
+      if (error) throw error;
+      return { updated: data?.length ?? 0 };
+    }),
+
+  bulkUpdatePriority: publicProcedure
+    .input(z.object({
+      ids: z.array(z.string().uuid()).min(1).max(100),
+      priority: z.enum(['high', 'low']).nullable(),
+    }))
+    .mutation(async ({ input }) => {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .update({ priority: input.priority, updated_at: new Date().toISOString() })
+        .in('id', input.ids)
+        .select('id');
+      if (error) throw error;
+      return { updated: data?.length ?? 0 };
     }),
 
   assignWorker: publicProcedure
