@@ -44,15 +44,26 @@ The API will set `status` to `open` and leave `assigned_to`, `notes`, `id`, `cre
 
 If you use Make.com’s Supabase module to insert into `support_tickets`, map your scenario data like this.
 
+### Important: Use email **sender** for caller_email (not body/signature)
+
+For **email** tickets, always set **caller_email** (and preferably **caller_name**) from the **email message headers** (the From/sender), **not** from OpenAI or body text. Otherwise the system can pick an address from the signature or CC (e.g. zimraana@allinit.com.au in the body or Ahmedm@allinit.com.au in CC) instead of the actual sender.
+
+- **caller_email**: Use the Microsoft Email module output for the **sender**, e.g. `{{6.from.emailAddress.address}}` or `{{6.sender.emailAddress.address}}` (module 6 = List messages; exact field name may be `from` or `sender` with nested `emailAddress.address`).
+- **caller_name**: Use the sender display name, e.g. `{{6.from.emailAddress.name}}` or `{{6.sender.emailAddress.name}}`, or keep OpenAI for name if you prefer.
+
+Do **not** map `caller_email` from the OpenAI result (e.g. `{{4.caller_email}}`) when the source is email; the AI reads the body and can return the wrong address.
+
 ### Columns you should set from Make.com
 
 | Supabase column   | Type      | Required | From Make.com / Notes |
 |-------------------|-----------|----------|------------------------|
-| `caller_name`     | text      | ✅ Yes   | Caller name |
-| `caller_phone`    | text      | ✅ Yes   | Caller phone |
+| `caller_name`     | text      | ✅ Yes   | Sender name from email **header** (e.g. `6.from.emailAddress.name`) or OpenAI |
+| `caller_email`    | text      | No       | **Sender address from email header** (e.g. `6.from.emailAddress.address`) — do not use body/OpenAI |
+| `conversation_id` | text      | No       | **Outlook conversationId** (e.g. `6.conversationId`) — required for matching inbound replies; see MAKE_WATCH_EMAILS_ADD_REPLY_BRANCH.md |
+| `caller_phone`    | text      | ✅ Yes   | Caller phone (OpenAI or null) |
 | `caller_business` | text      | No       | Business name or `null` |
-| `inquiry`         | text      | ✅ Yes   | Inquiry / issue text |
-| `summary`         | text      | No       | Summary or `null` |
+| `inquiry`         | text      | ✅ Yes   | Inquiry / issue text (e.g. `6.body.content`) |
+| `summary`         | text      | No       | Summary or `null` (OpenAI) |
 | `status`          | text      | No       | Use `'open'` for new tickets. Must be one of: `open`, `in-progress`, `resolved` |
 | `assigned_to`     | text      | No       | Assignee name/id or `null` |
 | `vapi_call_id`    | text      | No       | VAPI call ID or `null` |

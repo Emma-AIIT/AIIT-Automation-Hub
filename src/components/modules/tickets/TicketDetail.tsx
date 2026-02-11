@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { api } from '@/trpc/react';
 import { getWorkerColor } from '@/lib/worker-colors';
 import { format } from 'date-fns';
-import type { TicketStatus, TicketPriority, TicketSource, TicketAttachment } from '@/types/tickets';
+import type { TicketStatus, TicketPriority, TicketSource, TicketAttachment, TicketReply } from '@/types/tickets';
 
 interface Worker {
   id: string;
@@ -163,7 +163,13 @@ const SOURCE_BADGE_CLASS: Record<TicketSource, string> = {
 
 export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers: workersProp }) => {
   const { data: ticket, isLoading } = api.tickets.getById.useQuery({ id: ticketId });
+  const { data: replies = [] } = api.tickets.getReplies.useQuery(
+    { ticketId },
+    { enabled: !!ticket && ticket.source === 'email' }
+  );
   const [newNote, setNewNote] = useState('');
+  const [replyBody, setReplyBody] = useState('');
+  const [replyCc, setReplyCc] = useState('');
   const [pdfPreviewId, setPdfPreviewId] = useState<string | null>(null);
 
   const utils = api.useUtils();
@@ -190,6 +196,15 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
     onSuccess: () => {
       setNewNote('');
       void utils.tickets.getById.invalidate({ id: ticketId });
+    },
+  });
+
+  const sendReplyMutation = api.tickets.sendReply.useMutation({
+    onSuccess: () => {
+      setReplyBody('');
+      setReplyCc('');
+      void utils.tickets.getById.invalidate({ id: ticketId });
+      void utils.tickets.getReplies.invalidate({ ticketId });
     },
   });
 
@@ -487,6 +502,91 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
                       </div>
                     )}
                   </section>
+
+                  {/* Email thread + reply (email tickets only) */}
+                  {ticket.source === 'email' && (
+                    <section className="space-y-4">
+                      <h3 className="text-[11px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">Email thread</h3>
+                      {replies.length > 0 ? (
+                        <ul className="space-y-4 max-h-[320px] overflow-y-auto pr-1">
+                          {replies.map((reply: TicketReply) => (
+                            <li
+                              key={reply.id}
+                              className={`rounded-xl border p-4 shadow-sm ${
+                                reply.direction === 'outbound'
+                                  ? 'border-[var(--color-brand-orange)]/30 bg-[var(--color-accent-light)]/30 ml-4'
+                                  : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)] mr-4'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={`text-[10px] font-semibold uppercase tracking-wide ${
+                                  reply.direction === 'outbound' ? 'text-[var(--color-brand-orange)]' : 'text-[var(--color-text-muted)]'
+                                }`}>
+                                  {reply.direction === 'outbound' ? 'You' : 'Customer'}
+                                </span>
+                                {reply.sent_by && reply.direction === 'outbound' && (
+                                  <span className="text-[10px] text-[var(--color-text-muted)]">· {reply.sent_by}</span>
+                                )}
+                                <span className="text-[10px] text-[var(--color-text-muted)]">
+                                  {format(new Date(reply.created_at), 'dd MMM yyyy, h:mm a')}
+                                </span>
+                              </div>
+                              {reply.body_plain ? (
+                                <p className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap">{reply.body_plain}</p>
+                              ) : /^\s*</.test(reply.body) ? (
+                                <div
+                                  className="text-sm text-[var(--color-text-secondary)] prose prose-sm max-w-none"
+                                  dangerouslySetInnerHTML={{ __html: reply.body }}
+                                />
+                              ) : (
+                                <p className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap">{reply.body}</p>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)]/50 px-4 py-5 text-center">
+                          <p className="text-sm text-[var(--color-text-muted)]">No replies yet. Send a reply below.</p>
+                        </div>
+                      )}
+                      <div className="rounded-xl border border-[var(--color-border-subtle)] bg-white p-4 space-y-3">
+                        <p className="text-[11px] font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">Reply to {ticket.caller_email ?? 'customer'}</p>
+                        <textarea
+                          value={replyBody}
+                          onChange={(e) => setReplyBody(e.target.value)}
+                          placeholder="Type your reply…"
+                          rows={4}
+                          className="w-full px-4 py-3 rounded-lg border border-[var(--color-border-default)] bg-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] focus:border-transparent placeholder:text-[var(--color-text-muted)]"
+                        />
+                        <input
+                          type="text"
+                          value={replyCc}
+                          onChange={(e) => setReplyCc(e.target.value)}
+                          placeholder="CC (optional)"
+                          className="w-full px-4 py-2 rounded-lg border border-[var(--color-border-default)] bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] focus:border-transparent placeholder:text-[var(--color-text-muted)]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sendReplyMutation.mutate({
+                              ticketId,
+                              body: replyBody.trim(),
+                              bodyPlain: replyBody.trim(),
+                              cc: replyCc.trim() || undefined,
+                              sentBy: ticket.assigned_to ?? undefined,
+                            })
+                          }
+                          disabled={sendReplyMutation.isPending || !replyBody.trim()}
+                          className="px-4 py-2.5 rounded-lg bg-[var(--color-brand-orange)] text-white text-sm font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-orange)] focus:ring-offset-2"
+                        >
+                          {sendReplyMutation.isPending ? 'Sending…' : 'Send reply'}
+                        </button>
+                        {sendReplyMutation.isError && (
+                          <p className="text-xs text-red-600">{sendReplyMutation.error.message}</p>
+                        )}
+                      </div>
+                    </section>
+                  )}
 
                   {'attachments' in ticket && Array.isArray(ticket.attachments) && ticket.attachments.length > 0 && (
                     <section className="space-y-3">
