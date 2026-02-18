@@ -515,12 +515,12 @@ export const TicketDetail: FC<TicketDetailProps> = ({ ticketId, onClose, workers
                               className={`rounded-xl border p-4 shadow-sm ${
                                 reply.direction === 'outbound'
                                   ? 'border-[var(--color-brand-orange)]/30 bg-[var(--color-accent-light)]/30 ml-4'
-                                  : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)] mr-4'
+                                  : 'border-rose-200 bg-rose-50/80 mr-4'
                               }`}
                             >
                               <div className="flex items-center gap-2 mb-2">
                                 <span className={`text-[10px] font-semibold uppercase tracking-wide ${
-                                  reply.direction === 'outbound' ? 'text-[var(--color-brand-orange)]' : 'text-[var(--color-text-muted)]'
+                                  reply.direction === 'outbound' ? 'text-[var(--color-brand-orange)]' : 'text-rose-700'
                                 }`}>
                                   {reply.direction === 'outbound' ? 'You' : 'Customer'}
                                 </span>
