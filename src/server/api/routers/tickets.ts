@@ -508,6 +508,7 @@ export const ticketsRouter = createTRPCRouter({
               message_id: messageId,
               in_reply_to: inReplyTo,
               references: referencesHeader,
+              email_id: t.email_message_id ?? undefined,
             }),
           });
           if (!res.ok) {
