@@ -12,6 +12,8 @@ export const env = createEnv({
     MAKE_STALE_TICKET_WEBHOOK_URL: z.string().url().optional(),
     MAKE_SEND_EMAIL_WEBHOOK_URL: z.string().url().optional(),
     VAPI_API_KEY: z.string().min(1).optional(),
+    MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL: z.string().url().optional(),
+    MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL: z.string().url().optional(),
   },
 
   client: {
@@ -36,6 +38,8 @@ export const env = createEnv({
     MAKE_SEND_EMAIL_WEBHOOK_URL:
       process.env.MAKE_SEND_EMAIL_WEBHOOK_URL,
     VAPI_API_KEY: process.env.VAPI_API_KEY,
+    MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL: process.env.MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL,
+    MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL: process.env.MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL,
   },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

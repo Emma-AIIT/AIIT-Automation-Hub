@@ -298,7 +298,7 @@ export interface SidebarModule {
   id: string;
   label: string;
   route: string;
-  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket";
+  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp";
   badge?: { count: number; color: "red" | "blue" };
   disabled?: boolean;
   comingSoon?: boolean;
@@ -330,11 +330,9 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     icon: "ticket",
   },
   {
-    id: "lead-tracker",
-    label: "Lead Tracker",
-    route: "/automations/lead-tracker",
-    icon: "users",
-    disabled: true,
-    comingSoon: true,
+    id: "whatsapp-groups",
+    label: "WhatsApp Broadcast",
+    route: "/automations/whatsapp-groups",
+    icon: "whatsapp",
   },
 ];
