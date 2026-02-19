@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelector';
@@ -8,12 +8,22 @@ import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelecto
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 
 const MAX_CHARS = 1000;
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function WhatsAppBroadcastPage() {
   const [message, setMessage] = useState('');
+  const [image, setImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sendResults, setSendResults] = useState<Map<string, SendStatus>>(new Map());
   const [isSending, setIsSending] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
     data: groups = [],
@@ -24,7 +34,7 @@ export default function WhatsAppBroadcastPage() {
     isRefetching,
     isFetched,
   } = api.whatsapp.getGroups.useQuery(undefined, {
-    enabled: false, // only fires when user clicks Refresh
+    enabled: false,
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
@@ -57,8 +67,32 @@ export default function WhatsAppBroadcastPage() {
     await refetchGroups();
   }, [refetchGroups]);
 
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) return;
+
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('Image must be under 10MB');
+      e.target.value = '';
+      return;
+    }
+
+    setImage(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleClearImage = useCallback(() => {
+    setImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
   const handleSend = useCallback(async () => {
-    if (!message.trim() || selectedIds.size === 0 || isSending) return;
+    const hasMessage = message.trim().length > 0;
+    const hasImage = image !== null;
+    if ((!hasMessage && !hasImage) || selectedIds.size === 0 || isSending) return;
 
     setIsSending(true);
     const ids = Array.from(selectedIds);
@@ -71,7 +105,18 @@ export default function WhatsAppBroadcastPage() {
 
     for (const chatId of ids) {
       try {
-        await sendMutation.mutateAsync({ chatId, message: message.trim() });
+        if (hasImage) {
+          // Send via multipart API route so Make.com receives the file as binary
+          const formData = new FormData();
+          formData.append('chatId', chatId);
+          if (hasMessage) formData.append('message', message.trim());
+          formData.append('file', image!, image!.name);
+
+          const res = await fetch('/api/whatsapp/send', { method: 'POST', body: formData });
+          if (!res.ok) throw new Error('Failed to send');
+        } else {
+          await sendMutation.mutateAsync({ chatId, message: message.trim() });
+        }
         results.set(chatId, 'success');
         successCount++;
       } catch {
@@ -90,15 +135,14 @@ export default function WhatsAppBroadcastPage() {
     } else {
       toast(`Sent to ${successCount}, failed for ${errorCount}`, { icon: '⚠️' });
     }
-  }, [message, selectedIds, isSending, sendMutation]);
+  }, [message, image, selectedIds, isSending, sendMutation]);
 
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
 
-  const canSend = message.trim().length > 0 && selectedIds.size > 0 && !isSending;
+  const canSend = (message.trim().length > 0 || image !== null) && selectedIds.size > 0 && !isSending;
   const isLoading = groupsLoading || isRefetching;
-
   const hasSendResults = sendResults.size > 0;
 
   return (
@@ -141,22 +185,71 @@ export default function WhatsAppBroadcastPage() {
         <div className="rounded-xl border border-[var(--color-border-subtle)] bg-white shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border-subtle)]">
             <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Compose Message</h2>
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">This message will be sent to all selected groups</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+              Add a message, image, or both — sent to all selected groups
+            </p>
           </div>
 
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-3">
+            {/* Textarea */}
             <div className="relative">
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value.slice(0, MAX_CHARS))}
-                placeholder="Type your message here..."
-                rows={10}
+                placeholder="Type your message here... (optional if sending an image)"
+                rows={image ? 6 : 10}
                 className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-white px-4 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] focus:outline-none focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10 transition leading-relaxed"
               />
               <div className={`absolute bottom-3 right-3 text-xs tabular-nums ${charCountColor}`}>
                 {charCount}/{MAX_CHARS}
               </div>
             </div>
+
+            {/* Image attachment */}
+            {image && imagePreview ? (
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)">
+                <img
+                  src={imagePreview}
+                  alt="Attachment preview"
+                  className="w-14 h-14 rounded-md object-cover border border-(--color-border-subtle) shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-(--color-text-primary) truncate">{image.name}</p>
+                  <p className="text-xs text-(--color-text-muted) mt-0.5">{formatFileSize(image.size)}</p>
+                </div>
+                <button
+                  onClick={handleClearImage}
+                  title="Remove image"
+                  className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-(--color-text-muted) hover:text-red-500 hover:bg-red-50 transition"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-dashed border-(--color-border-default) hover:border-[#25D366] hover:bg-[#25D366]/5 cursor-pointer transition-all group">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+                <svg
+                  width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className="text-(--color-text-muted) group-hover:text-[#25D366] transition shrink-0"
+                >
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+                <span className="text-xs text-(--color-text-muted) group-hover:text-[#25D366] transition">
+                  Attach image <span className="text-(--color-text-faint)">— optional, max 10MB</span>
+                </span>
+              </label>
+            )}
 
             {/* Send button */}
             <button
