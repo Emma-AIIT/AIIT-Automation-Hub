@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { env } from '~/env';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB - Make.com webhook limit

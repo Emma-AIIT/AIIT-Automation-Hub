@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelector';
@@ -110,7 +111,7 @@ export default function WhatsAppBroadcastPage() {
           const formData = new FormData();
           formData.append('chatId', chatId);
           if (hasMessage) formData.append('message', message.trim());
-          formData.append('file', image!, image!.name);
+          formData.append('file', image, image.name);
 
           const res = await fetch('/api/whatsapp/send', { method: 'POST', body: formData });
           if (!res.ok) throw new Error('Failed to send');
@@ -208,10 +209,13 @@ export default function WhatsAppBroadcastPage() {
             {/* Image attachment */}
             {image && imagePreview ? (
               <div className="flex items-center gap-3 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)">
-                <img
+                <Image
                   src={imagePreview}
                   alt="Attachment preview"
+                  width={56}
+                  height={56}
                   className="w-14 h-14 rounded-md object-cover border border-(--color-border-subtle) shrink-0"
+                  unoptimized
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-(--color-text-primary) truncate">{image.name}</p>
