@@ -5,6 +5,8 @@ import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelector';
+import { ScheduleModal } from '@/components/modules/whatsapp-groups/ScheduleModal';
+import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledList';
 import type { WhatsAppGroup } from '@/server/api/routers/whatsapp';
 
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
@@ -60,6 +62,8 @@ export default function WhatsAppBroadcastPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sendResults, setSendResults] = useState<Map<string, SendStatus>>(new Map());
   const [isSending, setIsSending] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [scheduleCreatedBump, setScheduleCreatedBump] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Cache state
@@ -324,36 +328,60 @@ export default function WhatsAppBroadcastPage() {
               </label>
             )}
 
-            {/* Send button */}
-            <button
-              onClick={handleSend}
-              disabled={!canSend}
-              className={`
-                w-full flex items-center justify-center gap-2.5 py-3 rounded-lg text-sm font-semibold transition-all
-                ${canSend
-                  ? 'bg-[#25D366] hover:bg-[#20b858] text-white shadow-sm hover:shadow-md active:scale-[0.98]'
-                  : 'bg-[var(--color-bg-hover)] text-[var(--color-text-faint)] cursor-not-allowed border border-[var(--color-border-subtle)]'
-                }
-              `}
-            >
-              {isSending ? (
-                <>
-                  <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-                  </svg>
-                  {selectedIds.size > 0
-                    ? `Send to ${selectedIds.size} group${selectedIds.size !== 1 ? 's' : ''}`
-                    : 'Select groups to send'}
-                </>
-              )}
-            </button>
+            {/* Send buttons row */}
+            <div className="flex gap-2">
+              <button
+                onClick={handleSend}
+                disabled={!canSend}
+                className={`
+                  flex-1 flex items-center justify-center gap-2.5 py-3 rounded-lg text-sm font-semibold transition-all
+                  ${canSend
+                    ? 'bg-[#25D366] hover:bg-[#20b858] text-white shadow-sm hover:shadow-md active:scale-[0.98]'
+                    : 'bg-(--color-bg-hover) text-(--color-text-faint) cursor-not-allowed border border-(--color-border-subtle)'
+                  }
+                `}
+              >
+                {isSending ? (
+                  <>
+                    <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                    {selectedIds.size > 0
+                      ? `Send to ${selectedIds.size} group${selectedIds.size !== 1 ? 's' : ''}`
+                      : 'Send now'}
+                  </>
+                )}
+              </button>
+
+              {/* Schedule Send button */}
+              <button
+                onClick={() => setScheduleModalOpen(true)}
+                disabled={!canSend}
+                title="Schedule message for later"
+                className={`
+                  flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-lg text-sm font-semibold transition-all border
+                  ${canSend
+                    ? 'border-(--color-border-default) text-(--color-text-secondary) hover:bg-(--color-bg-hover) hover:border-(--color-border-strong) active:scale-[0.98]'
+                    : 'border-(--color-border-subtle) text-(--color-text-faint) cursor-not-allowed'
+                  }
+                `}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+                Schedule
+              </button>
+            </div>
 
             {/* Send summary */}
             {hasSendResults && !isSending && (
@@ -387,8 +415,8 @@ export default function WhatsAppBroadcastPage() {
         </div>
 
         {/* Right: Group selector */}
-        <div className="rounded-xl border border-[var(--color-border-subtle)] bg-white shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--color-border-subtle)] flex items-center justify-between gap-3">
+        <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-(--color-border-subtle) flex items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Select Groups</h2>
               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Choose which groups to broadcast to</p>
@@ -423,6 +451,19 @@ export default function WhatsAppBroadcastPage() {
           </div>
         </div>
       </div>
+
+      {/* Scheduled messages list */}
+      <ScheduledList onScheduleCreated={scheduleCreatedBump} />
+
+      {/* Schedule modal */}
+      <ScheduleModal
+        isOpen={scheduleModalOpen}
+        onClose={() => setScheduleModalOpen(false)}
+        message={message}
+        groupIds={Array.from(selectedIds)}
+        groupNames={Array.from(selectedIds).map((id) => groups.find((g) => g.id === id)?.name ?? id)}
+        onSuccess={() => setScheduleCreatedBump((n) => n + 1)}
+      />
     </div>
   );
 }

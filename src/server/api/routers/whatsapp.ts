@@ -1,6 +1,20 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { TRPCError } from "@trpc/server";
 import { env } from "~/env";
+import { createAdminClient } from "~/lib/supabase/admin";
+
+export interface ScheduledMessage {
+  id: string;
+  message: string;
+  group_ids: string[];
+  group_names: string[];
+  scheduled_at: string;
+  status: "pending" | "sent" | "failed" | "cancelled";
+  sent_at: string | null;
+  error: string | null;
+  created_at: string;
+}
 
 export interface WhatsAppGroup {
   id: string;
@@ -59,6 +73,53 @@ export const whatsappRouter = createTRPCRouter({
 
       if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
 
+      return { success: true };
+    }),
+
+  scheduleMessage: publicProcedure
+    .input(
+      z.object({
+        groupIds: z.array(z.string()).min(1),
+        groupNames: z.array(z.string()),
+        message: z.string().min(1),
+        scheduledAt: z.string(), // ISO UTC string
+      })
+    )
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { error } = await supabase.from("scheduled_messages").insert({
+        group_ids: input.groupIds,
+        group_names: input.groupNames,
+        message: input.message,
+        scheduled_at: input.scheduledAt,
+        status: "pending",
+      });
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      return { success: true };
+    }),
+
+  listScheduled: publicProcedure.query(async (): Promise<ScheduledMessage[]> => {
+    const supabase = createAdminClient();
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("scheduled_messages")
+      .select("*")
+      .or(`status.eq.pending,and(status.in.(sent,failed),sent_at.gte.${cutoff})`)
+      .order("scheduled_at", { ascending: true });
+    if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+    return (data ?? []) as ScheduledMessage[];
+  }),
+
+  cancelScheduled: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { error } = await supabase
+        .from("scheduled_messages")
+        .update({ status: "cancelled" })
+        .eq("id", input.id)
+        .eq("status", "pending");
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       return { success: true };
     }),
 });

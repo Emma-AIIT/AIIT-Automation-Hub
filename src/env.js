@@ -14,6 +14,7 @@ export const env = createEnv({
     VAPI_API_KEY: z.string().min(1).optional(),
     MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL: z.string().url().optional(),
     MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL: z.string().url().optional(),
+    CRON_SECRET: z.string().min(1).optional(),
   },
 
   client: {
@@ -40,6 +41,7 @@ export const env = createEnv({
     VAPI_API_KEY: process.env.VAPI_API_KEY,
     MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL: process.env.MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL,
     MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL: process.env.MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL,
+    CRON_SECRET: process.env.CRON_SECRET,
   },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,
