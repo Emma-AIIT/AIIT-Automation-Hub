@@ -24,6 +24,7 @@
     "@trpc/react-query": "^11.0.0",
     "@trpc/server": "^11.0.0",
     "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "geist": "^1.5.1",
     "next": "^15.2.3",
     "react": "^19.0.0",
