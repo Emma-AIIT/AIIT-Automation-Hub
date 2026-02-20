@@ -22,18 +22,11 @@ export const whatsappRouter = createTRPCRouter({
 
     const data: unknown = await res.json();
 
-    // Make.com returns the array directly: [{"0": groupName, "1": chatId}, ...]
-    // Guard: if somehow wrapped in {body: [...]} format, unwrap it too
+    // Make.com returns: [{ "body": [{ "groupId": "...", "subject": "..." }, ...], "status": 200 }]
     let rows: unknown[];
     if (Array.isArray(data)) {
       const first = data[0] as Record<string, unknown> | undefined;
-      if (first && Array.isArray(first.body)) {
-        // Wrapped format: [{ "body": [...], "status": 200 }]
-        rows = first.body as unknown[];
-      } else {
-        // Direct format: [{"0": name, "1": chatId}, ...]
-        rows = data;
-      }
+      rows = first && Array.isArray(first.body) ? (first.body as unknown[]) : data;
     } else {
       rows = [];
     }
@@ -41,8 +34,8 @@ export const whatsappRouter = createTRPCRouter({
     return rows
       .filter((row): row is Record<string, string | null> => typeof row === "object" && row !== null)
       .map((row) => ({
-        id: row["1"] != null ? String(row["1"]) : "",
-        name: row["0"] != null ? String(row["0"]) : "",
+        id: row.groupId != null ? String(row.groupId) : "",
+        name: row.subject != null ? String(row.subject) : "",
       }))
       .filter((g) => g.id.length > 0 && g.name.length > 0);
   }),

@@ -1,21 +1,57 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelector';
+import type { WhatsAppGroup } from '@/server/api/routers/whatsapp';
 
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 
 const MAX_CHARS = 1000;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const GROUPS_CACHE_KEY = 'wa_groups_v1';
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+// ── localStorage cache helpers ──────────────────────────────────────────────
+
+type GroupsCache = { groups: WhatsAppGroup[]; savedAt: number };
+
+function saveGroupsCache(groups: WhatsAppGroup[]) {
+  try {
+    localStorage.setItem(GROUPS_CACHE_KEY, JSON.stringify({ groups, savedAt: Date.now() }));
+  } catch {
+    // localStorage unavailable (SSR / private browsing) — silent fail
+  }
+}
+
+function loadGroupsCache(): GroupsCache | null {
+  try {
+    const raw = localStorage.getItem(GROUPS_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as GroupsCache;
+  } catch {
+    return null;
+  }
+}
+
+function formatCacheAge(ms: number): string {
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export default function WhatsAppBroadcastPage() {
   const [message, setMessage] = useState('');
@@ -26,8 +62,21 @@ export default function WhatsAppBroadcastPage() {
   const [isSending, setIsSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Cache state
+  const [cachedGroups, setCachedGroups] = useState<WhatsAppGroup[]>([]);
+  const [cacheAge, setCacheAge] = useState<number | null>(null); // ms since last save
+
+  // Load cache on mount
+  useEffect(() => {
+    const cache = loadGroupsCache();
+    if (cache) {
+      setCachedGroups(cache.groups);
+      setCacheAge(Date.now() - cache.savedAt);
+    }
+  }, []);
+
   const {
-    data: groups = [],
+    data: freshGroups = [],
     isLoading: groupsLoading,
     isError: groupsError,
     error: groupsErrorMsg,
@@ -37,8 +86,26 @@ export default function WhatsAppBroadcastPage() {
   } = api.whatsapp.getGroups.useQuery(undefined, {
     enabled: false,
     retry: false,
-    staleTime: 5 * 60 * 1000,
+    staleTime: CACHE_TTL_MS,
   });
+
+  // Save fresh data to localStorage whenever a fetch completes
+  useEffect(() => {
+    if (isFetched && freshGroups.length > 0) {
+      saveGroupsCache(freshGroups);
+      setCachedGroups(freshGroups);
+      setCacheAge(0);
+    }
+  }, [isFetched, freshGroups]);
+
+  // Prefer fresh tRPC data; fall back to localStorage cache
+  const groups = freshGroups.length > 0 ? freshGroups : cachedGroups;
+  const hasCachedData = cachedGroups.length > 0;
+  // Only show "not fetched yet" state if we have no cached data either
+  const notFetchedYet = !isFetched && !hasCachedData;
+
+  // Is the cache stale (older than TTL)?
+  const cacheIsStale = cacheAge !== null && cacheAge > CACHE_TTL_MS;
 
   const sendMutation = api.whatsapp.sendMessage.useMutation();
 
@@ -65,7 +132,9 @@ export default function WhatsAppBroadcastPage() {
   const handleRefresh = useCallback(async () => {
     setSelectedIds(new Set());
     setSendResults(new Map());
+    const toastId = toast.loading('Pulling from Green API, sit tight...');
     await refetchGroups();
+    toast.dismiss(toastId);
   }, [refetchGroups]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -175,7 +244,7 @@ export default function WhatsAppBroadcastPage() {
             <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
-          {isLoading ? 'Loading...' : 'Refresh groups'}
+          {isLoading ? 'Refreshing...' : 'Refresh groups'}
         </button>
       </div>
 
@@ -319,9 +388,22 @@ export default function WhatsAppBroadcastPage() {
 
         {/* Right: Group selector */}
         <div className="rounded-xl border border-[var(--color-border-subtle)] bg-white shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--color-border-subtle)]">
-            <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Select Groups</h2>
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Choose which groups to broadcast to</p>
+          <div className="px-5 py-4 border-b border-[var(--color-border-subtle)] flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Select Groups</h2>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Choose which groups to broadcast to</p>
+            </div>
+
+            {/* Cache age badge — only shown when we have cached data and no live fetch is running */}
+            {hasCachedData && !isLoading && cacheAge !== null && (
+              <span className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                cacheIsStale
+                  ? 'bg-amber-50 text-amber-600 border-amber-200'
+                  : 'bg-[#25D366]/8 text-[#1a9e4e] border-[#25D366]/20'
+              }`}>
+                {cacheIsStale ? '⚠ ' : ''}Cached · {formatCacheAge(cacheAge)}
+              </span>
+            )}
           </div>
 
           <div className="p-5" style={{ height: '460px', display: 'flex', flexDirection: 'column' }}>
@@ -330,7 +412,7 @@ export default function WhatsAppBroadcastPage() {
               loading={isLoading}
               isError={groupsError}
               errorMessage={groupsErrorMsg?.message}
-              notFetchedYet={!isFetched}
+              notFetchedYet={notFetchedYet}
               selectedIds={selectedIds}
               sendResults={sendResults}
               onToggle={handleToggle}
