@@ -38,7 +38,14 @@ export async function POST(req: NextRequest) {
     const res = await fetch(webhookUrl, { method: 'POST', body: outForm });
 
     if (!res.ok) {
-      throw new Error(`Make.com webhook returned ${res.status}`);
+      // Capture Make.com's error body (set by onerror WebhookRespond handlers in the scenario)
+      let makeError = `Make.com webhook returned ${res.status}`;
+      try {
+        const body = await res.text();
+        if (body) makeError = body;
+      } catch { /* ignore */ }
+      console.error('[whatsapp/send] Make.com error:', makeError);
+      return NextResponse.json({ error: 'Failed to send', makeError }, { status: 502 });
     }
 
     return NextResponse.json({ success: true });

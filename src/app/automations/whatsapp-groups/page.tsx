@@ -1,59 +1,24 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelector';
 import { ScheduleModal } from '@/components/modules/whatsapp-groups/ScheduleModal';
 import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledList';
-import type { WhatsAppGroup } from '@/server/api/routers/whatsapp';
+import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
 
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 
 const MAX_CHARS = 1000;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const GROUPS_CACHE_KEY = 'wa_groups_v1';
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-
-// ── localStorage cache helpers ──────────────────────────────────────────────
-
-type GroupsCache = { groups: WhatsAppGroup[]; savedAt: number };
-
-function saveGroupsCache(groups: WhatsAppGroup[]) {
-  try {
-    localStorage.setItem(GROUPS_CACHE_KEY, JSON.stringify({ groups, savedAt: Date.now() }));
-  } catch {
-    // localStorage unavailable (SSR / private browsing) — silent fail
-  }
-}
-
-function loadGroupsCache(): GroupsCache | null {
-  try {
-    const raw = localStorage.getItem(GROUPS_CACHE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as GroupsCache;
-  } catch {
-    return null;
-  }
-}
-
-function formatCacheAge(ms: number): string {
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-
-// ── Component ────────────────────────────────────────────────────────────────
 
 export default function WhatsAppBroadcastPage() {
   const [message, setMessage] = useState('');
@@ -64,63 +29,43 @@ export default function WhatsAppBroadcastPage() {
   const [isSending, setIsSending] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleCreatedBump, setScheduleCreatedBump] = useState(0);
+  const [broadcastHistoryBump, setBroadcastHistoryBump] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Cache state
-  const [cachedGroups, setCachedGroups] = useState<WhatsAppGroup[]>([]);
-  const [cacheAge, setCacheAge] = useState<number | null>(null); // ms since last save
-
-  // Load cache on mount
-  useEffect(() => {
-    const cache = loadGroupsCache();
-    if (cache) {
-      setCachedGroups(cache.groups);
-      setCacheAge(Date.now() - cache.savedAt);
-    }
-  }, []);
-
+  // Groups are loaded from Supabase DB — fast on every page load
   const {
-    data: freshGroups = [],
+    data: groups = [],
     isLoading: groupsLoading,
     isError: groupsError,
     error: groupsErrorMsg,
     refetch: refetchGroups,
-    isRefetching,
-    isFetched,
   } = api.whatsapp.getGroups.useQuery(undefined, {
-    enabled: false,
-    retry: false,
-    staleTime: CACHE_TTL_MS,
+    staleTime: 5 * 60 * 1000,
   });
 
-  // Save fresh data to localStorage whenever a fetch completes
-  useEffect(() => {
-    if (isFetched && freshGroups.length > 0) {
-      saveGroupsCache(freshGroups);
-      setCachedGroups(freshGroups);
-      setCacheAge(0);
-    }
-  }, [isFetched, freshGroups]);
-
-  // Prefer fresh tRPC data; fall back to localStorage cache
-  const groups = freshGroups.length > 0 ? freshGroups : cachedGroups;
-  const hasCachedData = cachedGroups.length > 0;
-  // Only show "not fetched yet" state if we have no cached data either
-  const notFetchedYet = !isFetched && !hasCachedData;
-
-  // Is the cache stale (older than TTL)?
-  const cacheIsStale = cacheAge !== null && cacheAge > CACHE_TTL_MS;
+  const syncMutation = api.whatsapp.syncGroups.useMutation({
+    onSuccess: (result) => {
+      const label = result.synced !== null ? `Synced ${result.synced} groups from WhatsApp` : 'Groups synced from WhatsApp';
+      toast.success(label, { duration: 6000 });
+      void refetchGroups();
+    },
+    onError: (err) => toast.error(`Failed to pull groups: ${err.message}`, { duration: 6000 }),
+  });
 
   const sendMutation = api.whatsapp.sendMessage.useMutation();
+  const logBroadcastMutation = api.whatsapp.logBroadcast.useMutation();
+
+  const isRefreshing = syncMutation.isPending;
+  const isLoading = groupsLoading || isRefreshing;
+
+  // Show empty state if DB has no groups yet (first use)
+  const notFetchedYet = groups.length === 0 && !groupsLoading && !groupsError;
 
   const handleToggle = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
@@ -133,13 +78,11 @@ export default function WhatsAppBroadcastPage() {
     setSelectedIds(new Set());
   }, []);
 
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(() => {
     setSelectedIds(new Set());
     setSendResults(new Map());
-    const toastId = toast.loading('Pulling from Green API, sit tight...');
-    await refetchGroups();
-    toast.dismiss(toastId);
-  }, [refetchGroups]);
+    syncMutation.mutate();
+  }, [syncMutation]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -176,6 +119,7 @@ export default function WhatsAppBroadcastPage() {
 
     let successCount = 0;
     let errorCount = 0;
+    const makeErrors: string[] = [];
 
     for (const chatId of ids) {
       try {
@@ -187,13 +131,21 @@ export default function WhatsAppBroadcastPage() {
           formData.append('file', image, image.name);
 
           const res = await fetch('/api/whatsapp/send', { method: 'POST', body: formData });
-          if (!res.ok) throw new Error('Failed to send');
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({})) as { makeError?: string };
+            if (json.makeError) makeErrors.push(json.makeError);
+            throw new Error(json.makeError ?? 'Failed to send');
+          }
         } else {
           await sendMutation.mutateAsync({ chatId, message: message.trim() });
         }
         results.set(chatId, 'success');
         successCount++;
-      } catch {
+      } catch (err) {
+        // Capture Make.com error message from tRPC error (text send path)
+        if (err instanceof Error && !makeErrors.includes(err.message)) {
+          makeErrors.push(err.message);
+        }
         results.set(chatId, 'error');
         errorCount++;
       }
@@ -202,6 +154,21 @@ export default function WhatsAppBroadcastPage() {
 
     setIsSending(false);
 
+    // Log broadcast to Supabase (fire-and-forget)
+    const overallStatus = errorCount === 0 ? 'sent' : successCount === 0 ? 'failed' : 'partial';
+    logBroadcastMutation.mutate({
+      message: message.trim() || undefined,
+      groupIds: ids,
+      groupNames: ids.map((id) => groups.find((g) => g.id === id)?.name ?? id),
+      hasFile: hasImage,
+      fileName: image?.name,
+      status: overallStatus,
+      makeError: makeErrors.length > 0 ? makeErrors.join('; ') : undefined,
+      sentCount: successCount,
+      failedCount: errorCount,
+    });
+    setBroadcastHistoryBump((n) => n + 1);
+
     if (errorCount === 0) {
       toast.success(`Message sent to ${successCount} group${successCount !== 1 ? 's' : ''}`);
     } else if (successCount === 0) {
@@ -209,14 +176,13 @@ export default function WhatsAppBroadcastPage() {
     } else {
       toast(`Sent to ${successCount}, failed for ${errorCount}`, { icon: '⚠️' });
     }
-  }, [message, image, selectedIds, isSending, sendMutation]);
+  }, [message, image, selectedIds, isSending, sendMutation, logBroadcastMutation, groups]);
 
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
 
   const canSend = (message.trim().length > 0 || image !== null) && selectedIds.size > 0 && !isSending;
-  const isLoading = groupsLoading || isRefetching;
   const hasSendResults = sendResults.size > 0;
 
   return (
@@ -230,15 +196,15 @@ export default function WhatsAppBroadcastPage() {
             </svg>
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">WhatsApp Broadcast</h1>
-            <p className="text-sm text-[var(--color-text-muted)] mt-0.5">Send messages to your WhatsApp groups</p>
+            <h1 className="text-xl font-semibold text-(--color-text-primary)">WhatsApp Broadcast</h1>
+            <p className="text-sm text-(--color-text-muted) mt-0.5">Send messages to your WhatsApp groups</p>
           </div>
         </div>
 
         <button
           onClick={handleRefresh}
           disabled={isLoading}
-          className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-[var(--color-border-default)] bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-(--color-border-default) bg-white text-(--color-text-secondary) hover:bg-(--color-bg-hover) hover:border-(--color-border-strong) disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           <svg
             className={`${isLoading ? 'animate-spin' : ''}`}
@@ -256,10 +222,10 @@ export default function WhatsAppBroadcastPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.1fr] gap-6 items-start">
 
         {/* Left: Compose */}
-        <div className="rounded-xl border border-[var(--color-border-subtle)] bg-white shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--color-border-subtle)]">
-            <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Compose Message</h2>
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+        <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-(--color-border-subtle)">
+            <h2 className="text-sm font-semibold text-(--color-text-primary)">Compose Message</h2>
+            <p className="text-xs text-(--color-text-muted) mt-0.5">
               Add a message, image, or both — sent to all selected groups
             </p>
           </div>
@@ -272,7 +238,7 @@ export default function WhatsAppBroadcastPage() {
                 onChange={(e) => setMessage(e.target.value.slice(0, MAX_CHARS))}
                 placeholder="Type your message here... (optional if sending an image)"
                 rows={image ? 6 : 10}
-                className="w-full resize-none rounded-lg border border-[var(--color-border-default)] bg-white px-4 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] focus:outline-none focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10 transition leading-relaxed"
+                className="w-full resize-none rounded-lg border border-(--color-border-default) bg-white px-4 py-3 text-sm text-(--color-text-primary) placeholder:text-(--color-text-faint) focus:outline-none focus:border-(--color-accent-primary) focus:ring-2 focus:ring-(--color-accent-primary)/10 transition leading-relaxed"
               />
               <div className={`absolute bottom-3 right-3 text-xs tabular-nums ${charCountColor}`}>
                 {charCount}/{MAX_CHARS}
@@ -385,8 +351,8 @@ export default function WhatsAppBroadcastPage() {
 
             {/* Send summary */}
             {hasSendResults && !isSending && (
-              <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)] px-4 py-3">
-                <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">Last send results</p>
+              <div className="rounded-lg border border-(--color-border-subtle) bg-(--color-bg-secondary) px-4 py-3">
+                <p className="text-xs font-medium text-(--color-text-secondary) mb-2">Last send results</p>
                 <div className="flex items-center gap-4">
                   {(() => {
                     const successCount = Array.from(sendResults.values()).filter((s) => s === 'success').length;
@@ -396,13 +362,13 @@ export default function WhatsAppBroadcastPage() {
                         {successCount > 0 && (
                           <div className="flex items-center gap-1.5">
                             <div className="w-2 h-2 rounded-full bg-[#25D366]" />
-                            <span className="text-xs text-[var(--color-text-secondary)]">{successCount} sent</span>
+                            <span className="text-xs text-(--color-text-secondary)">{successCount} sent</span>
                           </div>
                         )}
                         {errorCount > 0 && (
                           <div className="flex items-center gap-1.5">
                             <div className="w-2 h-2 rounded-full bg-red-400" />
-                            <span className="text-xs text-[var(--color-text-secondary)]">{errorCount} failed</span>
+                            <span className="text-xs text-(--color-text-secondary)">{errorCount} failed</span>
                           </div>
                         )}
                       </>
@@ -416,22 +382,9 @@ export default function WhatsAppBroadcastPage() {
 
         {/* Right: Group selector */}
         <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-(--color-border-subtle) flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Select Groups</h2>
-              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Choose which groups to broadcast to</p>
-            </div>
-
-            {/* Cache age badge — only shown when we have cached data and no live fetch is running */}
-            {hasCachedData && !isLoading && cacheAge !== null && (
-              <span className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full border ${
-                cacheIsStale
-                  ? 'bg-amber-50 text-amber-600 border-amber-200'
-                  : 'bg-[#25D366]/8 text-[#1a9e4e] border-[#25D366]/20'
-              }`}>
-                {cacheIsStale ? '⚠ ' : ''}Cached · {formatCacheAge(cacheAge)}
-              </span>
-            )}
+          <div className="px-5 py-4 border-b border-(--color-border-subtle)">
+            <h2 className="text-sm font-semibold text-(--color-text-primary)">Select Groups</h2>
+            <p className="text-xs text-(--color-text-muted) mt-0.5">Choose which groups to broadcast to</p>
           </div>
 
           <div className="p-5" style={{ height: '460px', display: 'flex', flexDirection: 'column' }}>
@@ -454,6 +407,9 @@ export default function WhatsAppBroadcastPage() {
 
       {/* Scheduled messages list */}
       <ScheduledList onScheduleCreated={scheduleCreatedBump} />
+
+      {/* Broadcast history (immediate sends log) */}
+      <BroadcastHistory refreshBump={broadcastHistoryBump} />
 
       {/* Schedule modal */}
       <ScheduleModal
