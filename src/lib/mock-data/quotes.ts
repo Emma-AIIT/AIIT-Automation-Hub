@@ -335,4 +335,10 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     route: "/automations/whatsapp-groups",
     icon: "whatsapp",
   },
+  {
+    id: "whatsapp-participants",
+    label: "WhatsApp Groups & Participants",
+    route: "/automations/whatsapp-participants",
+    icon: "users",
+  },
 ];

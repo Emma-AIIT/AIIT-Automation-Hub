@@ -36,6 +36,21 @@ export interface BroadcastLogEntry {
   created_at: string;
 }
 
+export interface DashboardGroup {
+  group_id: string;
+  group_name: string;
+  size?: number;
+  /** Number of participants in whatsapp_group_participants (0 = not pulled yet) */
+  participant_count: number;
+}
+
+export interface ParticipantEntry {
+  participant_id: string;
+  participant_phone: string;
+  participant_name: string | null;
+  group_chat_name: string;
+}
+
 export const whatsappRouter = createTRPCRouter({
   // Reads from Supabase DB cache — fast, no Make.com call
   getGroups: publicProcedure.query(async (): Promise<WhatsAppGroup[]> => {
@@ -200,4 +215,86 @@ export const whatsappRouter = createTRPCRouter({
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       return { success: true };
     }),
+
+  // Dashboard groups: list of groups selected for participants view (whatsapp_dashboard_groups)
+  getDashboardGroups: publicProcedure.query(async (): Promise<DashboardGroup[]> => {
+    const supabase = createAdminClient();
+    const { data: dashboardRows, error: dashboardError } = await supabase
+      .from("whatsapp_dashboard_groups")
+      .select("group_id, group_name")
+      .order("group_name", { ascending: true });
+    if (dashboardError) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: dashboardError.message });
+    if (!dashboardRows?.length) return [];
+
+    const groupIds = dashboardRows.map((r) => r.group_id);
+    const { data: sizeRows } = await supabase
+      .from("whatsapp_groups")
+      .select("id, size")
+      .in("id", groupIds);
+    const sizeMap = new Map<string, number>();
+    for (const row of sizeRows ?? []) {
+      if (typeof (row as { id: string; size: number | null }).size === "number") {
+        sizeMap.set((row as { id: string; size: number }).id, (row as { id: string; size: number }).size);
+      }
+    }
+
+    const participantCountMap = new Map<string, number>();
+    await Promise.all(
+      groupIds.map(async (groupId) => {
+        const { count, error } = await supabase
+          .from("whatsapp_group_participants")
+          .select("*", { count: "exact", head: true })
+          .eq("group_chat_id", groupId);
+        participantCountMap.set(groupId, error ? 0 : (count ?? 0));
+      })
+    );
+
+    return dashboardRows.map((r) => ({
+      group_id: r.group_id,
+      group_name: r.group_name,
+      size: sizeMap.get(r.group_id),
+      participant_count: participantCountMap.get(r.group_id) ?? 0,
+    })) as DashboardGroup[];
+  }),
+
+  getParticipantsByGroupId: publicProcedure
+    .input(z.object({ groupId: z.string().min(1) }))
+    .query(async ({ input }): Promise<ParticipantEntry[]> => {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase
+        .from("whatsapp_group_participants")
+        .select("participant_id, participant_phone, participant_name, group_chat_name")
+        .eq("group_chat_id", input.groupId)
+        .order("participant_phone", { ascending: true });
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      return (data ?? []) as ParticipantEntry[];
+    }),
+
+  syncParticipants: publicProcedure.mutation(async () => {
+    const webhookUrl = env.MAKE_WHATSAPP_PULL_PARTICIPANTS_WEBHOOK_URL;
+    if (!webhookUrl) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "MAKE_WHATSAPP_PULL_PARTICIPANTS_WEBHOOK_URL is not configured" });
+
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trigger: "pull_participants" }),
+    });
+
+    if (!res.ok) {
+      let makeError = `Webhook returned ${res.status}`;
+      try {
+        const body = await res.text();
+        if (body) makeError = body;
+      } catch { /* ignore */ }
+      throw new TRPCError({ code: "BAD_GATEWAY", message: makeError });
+    }
+
+    let groupsProcessed: number | null = null;
+    try {
+      const json = (await res.json()) as { groupsProcessed?: number };
+      if (typeof json.groupsProcessed === "number") groupsProcessed = json.groupsProcessed;
+    } catch { /* ignore */ }
+
+    return { success: true, groupsProcessed };
+  }),
 });
