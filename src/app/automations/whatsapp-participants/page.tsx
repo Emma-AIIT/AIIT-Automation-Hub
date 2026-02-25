@@ -109,7 +109,7 @@ export default function WhatsAppParticipantsPage() {
       () => toast.success(`Copied ${participantsWithNumbers.length} number(s) to clipboard`),
       () => toast.error('Failed to copy')
     );
-  }, [participantsWithNumbers]);
+  }, [participantsWithNumbers, participants.length]);
 
   const isLoading = groupsLoading;
   const syncButtonDisabled = isLoading || !selectedGroupId;

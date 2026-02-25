@@ -289,7 +289,7 @@ export const whatsappRouter = createTRPCRouter({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
-    }).catch(() => {});
+    }).catch(() => { /* fire-and-forget */ });
 
     return {
       success: true,
