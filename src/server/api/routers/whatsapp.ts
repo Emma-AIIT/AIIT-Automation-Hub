@@ -261,14 +261,74 @@ export const whatsappRouter = createTRPCRouter({
     .input(z.object({ groupId: z.string().min(1) }))
     .query(async ({ input }): Promise<ParticipantEntry[]> => {
       const supabase = createAdminClient();
-      const { data, error } = await supabase
-        .from("whatsapp_group_participants")
-        .select("participant_id, participant_phone, participant_name, group_chat_name")
-        .eq("group_chat_id", input.groupId)
-        .order("participant_phone", { ascending: true });
-      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
-      return (data ?? []) as ParticipantEntry[];
+      const PAGE_SIZE = 1000;
+      let offset = 0;
+      let hasMore = true;
+      const allData: ParticipantEntry[] = [];
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("whatsapp_group_participants")
+          .select("participant_id, participant_phone, participant_name, group_chat_name")
+          .eq("group_chat_id", input.groupId)
+          .order("participant_id", { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+        const page = (data ?? []) as ParticipantEntry[];
+        allData.push(...page);
+        hasMore = page.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+      }
+
+      // Sort by phone for display (nulls/empty last)
+      return allData.sort((a, b) => {
+        if (!a.participant_phone?.trim()) return 1;
+        if (!b.participant_phone?.trim()) return -1;
+        return a.participant_phone.localeCompare(b.participant_phone);
+      });
     }),
+
+  /** All unique phone numbers from whatsapp_group_participants (extractable only: @c.us, non-empty phone).
+   * Filters @c.us and non-null phones in SQL to reduce rows fetched, then deduplicates in memory. */
+  getAllParticipantsPhones: publicProcedure.query(async (): Promise<{
+    phones: string[];
+    totalParticipantRows: number;
+  }> => {
+    const supabase = createAdminClient();
+    const PAGE_SIZE = 1000;
+    let offset = 0;
+    let hasMore = true;
+    const seen = new Set<string>();
+    const phones: string[] = [];
+    let totalRows = 0;
+
+    while (hasMore) {
+      const { data: rows, error } = await supabase
+        .from("whatsapp_group_participants")
+        .select("participant_phone")
+        .like("participant_id", "%@c.us")          // filter @lid / non-standard IDs in SQL
+        .not("participant_phone", "is", null)       // filter nulls in SQL
+        .order("participant_id", { ascending: true }) // stable sort on existing column
+        .range(offset, offset + PAGE_SIZE - 1);
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      const list = (rows ?? []) as { participant_phone: string | null }[];
+      totalRows += list.length;
+      for (const r of list) {
+        const phone = r.participant_phone?.trim();
+        if (phone && !seen.has(phone)) {
+          seen.add(phone);
+          phones.push(phone);
+        }
+      }
+      hasMore = list.length === PAGE_SIZE;
+      offset += PAGE_SIZE;
+    }
+
+    return {
+      phones: phones.sort((a, b) => a.localeCompare(b)),
+      totalParticipantRows: totalRows,
+    };
+  }),
 
   syncParticipants: publicProcedure
     .input(z.object({ groupId: z.string().min(1), groupName: z.string() }))

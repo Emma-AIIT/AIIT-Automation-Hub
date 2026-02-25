@@ -130,7 +130,7 @@ export default function WhatsAppParticipantsPage() {
               WhatsApp Groups & Participants
             </h1>
             <p className="text-sm text-(--color-text-muted) mt-0.5 leading-snug">
-              View participants and copy numbers for selected groups
+              View participants and download numbers for selected groups
             </p>
           </div>
         </div>
@@ -255,6 +255,27 @@ export default function WhatsAppParticipantsPage() {
               ))
             )}
           </div>
+          {/* Download all numbers across all groups — direct API route, no clipboard involved */}
+          {dashboardGroups.length > 0 && (
+            <div className="p-3 border-t border-(--color-border-subtle) bg-(--color-bg-secondary)">
+              <a
+                href="/api/whatsapp/download-phones"
+                download
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg bg-[#25D366] text-white hover:bg-[#20b858] transition"
+                title="Download unique phone numbers from all groups as a .txt file"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Download all numbers (all groups)
+              </a>
+              <p className="text-xs text-(--color-text-muted) mt-2 leading-relaxed text-center">
+                Downloads a <span className="font-medium">.txt file</span> of all unique numbers across every group — no duplicates. Open the file, Select All, then copy &amp; paste wherever you need.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Right: participants for selected group */}
