@@ -50,18 +50,39 @@ export default function WhatsAppParticipantsPage() {
     participantPage * PARTICIPANTS_PAGE_SIZE
   );
 
+  const selectedGroup = selectedGroupId
+    ? dashboardGroups.find((g) => g.group_id === selectedGroupId)
+    : null;
+
   const syncMutation = api.whatsapp.syncParticipants.useMutation({
     onSuccess: (result) => {
-      const msg =
-        result.groupsProcessed != null
-          ? `Synced participants for ${result.groupsProcessed} group(s)`
+      const name =
+        result.groupName ??
+        (result.groupId && selectedGroup?.group_id === result.groupId ? selectedGroup.group_name : null) ??
+        (result.groupId ? `group ${result.groupId}` : null);
+      const msg = result.started
+        ? name
+          ? `Sync started for ${name}. Refresh in a few minutes to see updated participants.`
+          : 'Sync started. Refresh in a few minutes to see updated participants.'
+        : name
+          ? `Synced participants for ${name}`
           : 'Participants sync completed';
-      toast.success(msg, { duration: 5000 });
+      toast.success(msg, { duration: 6000 });
       void refetchGroups();
       if (selectedGroupId) void refetchParticipants();
     },
-    onError: (err) => toast.error(`Sync failed: ${err.message}`, { duration: 6000 }),
+    onError: (err) =>
+      toast.error(err.message ? `Sync failed: ${err.message}` : 'Sync failed', { duration: 8000 }),
   });
+
+  const handleSyncParticipants = useCallback(() => {
+    if (!selectedGroupId || !selectedGroup) {
+      toast.error('Select a group to sync');
+      return;
+    }
+    toast.success('Sync request sent', { duration: 4000 });
+    syncMutation.mutate({ groupId: selectedGroupId, groupName: selectedGroup.group_name ?? '' });
+  }, [selectedGroupId, selectedGroup, syncMutation]);
 
   const filteredGroups = search.trim()
     ? dashboardGroups.filter(
@@ -71,19 +92,27 @@ export default function WhatsAppParticipantsPage() {
       )
     : dashboardGroups;
 
+  const isUnextractable = useCallback((p: { participant_id: string; participant_phone: string }) => {
+    return p.participant_id.endsWith('@lid') || !p.participant_phone?.trim();
+  }, []);
+
+  const participantsWithNumbers = participants.filter((p) => p.participant_phone?.trim() && p.participant_id.endsWith('@c.us'));
+  const unextractableCount = participants.filter((p) => isUnextractable(p)).length;
+
   const handleCopyAllNumbers = useCallback(() => {
-    if (participants.length === 0) {
-      toast.error('No participants to copy');
+    if (participantsWithNumbers.length === 0) {
+      toast.error(participants.length === 0 ? 'No participants to copy' : 'No phone numbers to copy (all are LID/private)');
       return;
     }
-    const text = participants.map((p) => p.participant_phone).join('\n');
+    const text = participantsWithNumbers.map((p) => p.participant_phone).join('\n');
     void navigator.clipboard.writeText(text).then(
-      () => toast.success(`Copied ${participants.length} number(s) to clipboard`),
+      () => toast.success(`Copied ${participantsWithNumbers.length} number(s) to clipboard`),
       () => toast.error('Failed to copy')
     );
-  }, [participants]);
+  }, [participantsWithNumbers]);
 
-  const isLoading = groupsLoading || syncMutation.isPending;
+  const isLoading = groupsLoading;
+  const syncButtonDisabled = isLoading || !selectedGroupId;
   const noGroupsYet = dashboardGroups.length === 0 && !groupsLoading && !groupsError;
 
   return (
@@ -97,21 +126,21 @@ export default function WhatsAppParticipantsPage() {
             </svg>
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-(--color-text-primary)">
+            <h1 className="text-xl font-semibold tracking-tight text-(--color-text-primary)">
               WhatsApp Groups & Participants
             </h1>
-            <p className="text-sm text-(--color-text-muted) mt-0.5">
+            <p className="text-sm text-(--color-text-muted) mt-0.5 leading-snug">
               View participants and copy numbers for selected groups
             </p>
           </div>
         </div>
         <button
-          onClick={() => syncMutation.mutate()}
-          disabled={isLoading}
+          onClick={handleSyncParticipants}
+          disabled={syncButtonDisabled}
+          title={!selectedGroupId ? 'Select a group to sync' : undefined}
           className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-(--color-border-default) bg-white text-(--color-text-secondary) hover:bg-(--color-bg-hover) hover:border-(--color-border-strong) disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           <svg
-            className={isLoading ? 'animate-spin' : ''}
             width="14"
             height="14"
             viewBox="0 0 24 24"
@@ -125,7 +154,7 @@ export default function WhatsAppParticipantsPage() {
             <path d="M1 20v-6h6" />
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
-          {isLoading ? 'Syncing...' : 'Sync participants'}
+          Sync participants
         </button>
       </div>
 
@@ -134,11 +163,13 @@ export default function WhatsAppParticipantsPage() {
         {/* Left: dashboard groups list */}
         <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden flex flex-col">
           <div className="px-5 py-4 border-b border-(--color-border-subtle)">
-            <h2 className="text-sm font-semibold text-(--color-text-primary)">Groups</h2>
-            <p className="text-xs text-(--color-text-secondary) mt-0.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-(--color-text-muted)">
+              Groups
+            </h2>
+            <p className="text-xs text-(--color-text-secondary) mt-1.5 leading-relaxed">
               Select a group to see participants
             </p>
-            <p className="text-[11px] text-(--color-text-muted) mt-1.5" title="Members = group size from WhatsApp. Participants = contacts we've pulled and stored. Some contacts can fail to pull, so counts may be lower than actual.">
+            <p className="text-xs font-medium text-(--color-text-primary) mt-2 leading-snug" title="Members = group size from WhatsApp. Participants = contacts we've pulled and stored. Some contacts can fail to pull, so counts may be lower than actual.">
               Members = group size · Participants = pulled &amp; stored (counts may be lower if some contacts failed to pull)
             </p>
           </div>
@@ -230,8 +261,10 @@ export default function WhatsAppParticipantsPage() {
         <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden flex flex-col">
           <div className="px-5 py-4 border-b border-(--color-border-subtle) flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <h2 className="text-sm font-semibold text-(--color-text-primary)">Participants</h2>
-              <p className="text-xs text-(--color-text-muted) mt-0.5">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-(--color-text-muted)">
+                Participants
+              </h2>
+              <p className="text-xs text-(--color-text-secondary) mt-1.5 leading-relaxed">
                 {selectedGroupId
                   ? dashboardGroups.find((g) => g.group_id === selectedGroupId)?.group_name ?? 'Selected group'
                   : 'Select a group to see participants'}
@@ -286,38 +319,72 @@ export default function WhatsAppParticipantsPage() {
               </div>
             ) : (
               <>
+                {unextractableCount > 0 && (
+                  <div className="flex items-start gap-3 px-4 py-3 border-b border-amber-200/60 bg-amber-50/70" role="alert">
+                    <span className="shrink-0 mt-0.5 w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center" aria-hidden>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <path d="M12 9v4" />
+                        <path d="M12 17h.01" />
+                      </svg>
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-amber-900">
+                          {unextractableCount} participant{unextractableCount !== 1 ? 's' : ''} without phone numbers
+                        </p>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-200/70 text-amber-800">
+                          LID / private
+                        </span>
+                      </div>
+                      <p className="text-xs mt-0.5 text-amber-700/80 leading-relaxed">
+                        These contacts use a WhatsApp private ID and have no extractable phone number. They appear in the list but are excluded from &quot;Copy all numbers&quot;.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-(--color-border-subtle) bg-(--color-bg-secondary)">
-                        <th className="text-left py-3 px-4 font-semibold text-(--color-text-secondary)">
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-(--color-text-muted)">
                           Phone
                         </th>
-                        <th className="text-left py-3 px-4 font-semibold text-(--color-text-secondary)">
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-(--color-text-muted)">
                           Name
                         </th>
-                        <th className="text-left py-3 px-4 font-semibold text-(--color-text-secondary) hidden sm:table-cell">
+                        <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-(--color-text-muted) hidden sm:table-cell">
                           Participant ID
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {paginatedParticipants.map((p) => (
-                        <tr
-                          key={p.participant_id}
-                          className="border-b border-(--color-border-subtle) hover:bg-(--color-bg-hover)"
-                        >
-                          <td className="py-2.5 px-4 text-(--color-text-primary) font-mono text-xs">
-                            {p.participant_phone}
-                          </td>
-                          <td className="py-2.5 px-4 text-(--color-text-secondary)">
-                            {p.participant_name ?? '—'}
-                          </td>
-                          <td className="py-2.5 px-4 text-(--color-text-faint) font-mono text-xs hidden sm:table-cell">
-                            {p.participant_id}
-                          </td>
-                        </tr>
-                      ))}
+                      {paginatedParticipants.map((p) => {
+                        const unextractable = isUnextractable(p);
+                        return (
+                          <tr
+                            key={p.participant_id}
+                            className="border-b border-(--color-border-subtle) hover:bg-(--color-bg-hover)"
+                          >
+                            <td className="py-2.5 px-4 font-mono text-xs tabular-nums">
+                              {unextractable ? (
+                                <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400 font-medium">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-red-500/70 dark:bg-red-400/70 shrink-0" aria-hidden />
+                                  Could not extract (LID/private)
+                                </span>
+                              ) : (
+                                <span className="text-(--color-text-primary)">{p.participant_phone}</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 text-(--color-text-secondary) leading-relaxed">
+                              {unextractable ? (p.participant_name?.trim() || '—') : (p.participant_name ?? '—')}
+                            </td>
+                            <td className="py-2.5 px-4 font-mono text-xs text-(--color-text-faint) hidden sm:table-cell tabular-nums">
+                              {p.participant_id}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

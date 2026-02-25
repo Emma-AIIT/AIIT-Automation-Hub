@@ -270,31 +270,32 @@ export const whatsappRouter = createTRPCRouter({
       return (data ?? []) as ParticipantEntry[];
     }),
 
-  syncParticipants: publicProcedure.mutation(async () => {
+  syncParticipants: publicProcedure
+    .input(z.object({ groupId: z.string().min(1), groupName: z.string() }))
+    .mutation(async ({ input }) => {
     const webhookUrl = env.MAKE_WHATSAPP_PULL_PARTICIPANTS_WEBHOOK_URL;
     if (!webhookUrl) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "MAKE_WHATSAPP_PULL_PARTICIPANTS_WEBHOOK_URL is not configured" });
 
-    const res = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ trigger: "pull_participants" }),
+    const body = JSON.stringify({
+      trigger: "pull_participants",
+      group_id: input.groupId,
+      group_name: input.groupName,
     });
 
-    if (!res.ok) {
-      let makeError = `Webhook returned ${res.status}`;
-      try {
-        const body = await res.text();
-        if (body) makeError = body;
-      } catch { /* ignore */ }
-      throw new TRPCError({ code: "BAD_GATEWAY", message: makeError });
-    }
+    // Fire-and-forget: trigger Make.com and respond to the client immediately so the
+    // success toast always shows. Long-running syncs (e.g. 600+ participants) would
+    // otherwise time out the client before Make.com responds.
+    void fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    }).catch(() => {});
 
-    let groupsProcessed: number | null = null;
-    try {
-      const json = (await res.json()) as { groupsProcessed?: number };
-      if (typeof json.groupsProcessed === "number") groupsProcessed = json.groupsProcessed;
-    } catch { /* ignore */ }
-
-    return { success: true, groupsProcessed };
+    return {
+      success: true,
+      groupId: input.groupId,
+      groupName: input.groupName,
+      started: true,
+    };
   }),
 });
