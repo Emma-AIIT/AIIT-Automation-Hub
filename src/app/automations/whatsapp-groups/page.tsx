@@ -8,6 +8,8 @@ import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelecto
 import { ScheduleModal } from '@/components/modules/whatsapp-groups/ScheduleModal';
 import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledList';
 import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
+import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
+import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 
@@ -21,6 +23,7 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function WhatsAppBroadcastPage() {
+  const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [message, setMessage] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -32,6 +35,16 @@ export default function WhatsAppBroadcastPage() {
   const [broadcastHistoryBump, setBroadcastHistoryBump] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const handleAccountSwitch = useCallback((id: WhatsAppAccountId) => {
+    setActiveAccount(id);
+    setMessage('');
+    setImage(null);
+    setImagePreview(null);
+    setSelectedIds(new Set());
+    setSendResults(new Map());
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
   // Groups are loaded from Supabase DB — fast on every page load
   const {
     data: groups = [],
@@ -39,9 +52,10 @@ export default function WhatsAppBroadcastPage() {
     isError: groupsError,
     error: groupsErrorMsg,
     refetch: refetchGroups,
-  } = api.whatsapp.getGroups.useQuery(undefined, {
-    staleTime: 5 * 60 * 1000,
-  });
+  } = api.whatsapp.getGroups.useQuery(
+    { accountId: activeAccount },
+    { staleTime: 5 * 60 * 1000 },
+  );
 
   const syncMutation = api.whatsapp.syncGroups.useMutation({
     onSuccess: (result) => {
@@ -81,8 +95,8 @@ export default function WhatsAppBroadcastPage() {
   const handleRefresh = useCallback(() => {
     setSelectedIds(new Set());
     setSendResults(new Map());
-    syncMutation.mutate();
-  }, [syncMutation]);
+    syncMutation.mutate({ accountId: activeAccount });
+  }, [syncMutation, activeAccount]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -127,6 +141,7 @@ export default function WhatsAppBroadcastPage() {
           // Send via multipart API route so Make.com receives the file as binary
           const formData = new FormData();
           formData.append('chatId', chatId);
+          formData.append('accountId', activeAccount);
           if (hasMessage) formData.append('message', message.trim());
           formData.append('file', image, image.name);
 
@@ -137,7 +152,7 @@ export default function WhatsAppBroadcastPage() {
             throw new Error(json.makeError ?? 'Failed to send');
           }
         } else {
-          await sendMutation.mutateAsync({ chatId, message: message.trim() });
+          await sendMutation.mutateAsync({ accountId: activeAccount, chatId, message: message.trim() });
         }
         results.set(chatId, 'success');
         successCount++;
@@ -157,6 +172,7 @@ export default function WhatsAppBroadcastPage() {
     // Log broadcast to Supabase (fire-and-forget)
     const overallStatus = errorCount === 0 ? 'sent' : successCount === 0 ? 'failed' : 'partial';
     logBroadcastMutation.mutate({
+      accountId: activeAccount,
       message: message.trim() || undefined,
       groupIds: ids,
       groupNames: ids.map((id) => groups.find((g) => g.id === id)?.name ?? id),
@@ -176,7 +192,7 @@ export default function WhatsAppBroadcastPage() {
     } else {
       toast(`Sent to ${successCount}, failed for ${errorCount}`, { icon: '⚠️' });
     }
-  }, [message, image, selectedIds, isSending, sendMutation, logBroadcastMutation, groups]);
+  }, [message, image, selectedIds, isSending, activeAccount, sendMutation, logBroadcastMutation, groups]);
 
   const charCount = message.length;
   const charCountColor =
@@ -216,6 +232,26 @@ export default function WhatsAppBroadcastPage() {
           </svg>
           {isLoading ? 'Refreshing...' : 'Refresh groups'}
         </button>
+      </div>
+
+      {/* Account Tabs */}
+      <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit">
+        {WHATSAPP_ACCOUNTS.map((account) => (
+          <button
+            key={account.id}
+            onClick={() => handleAccountSwitch(account.id)}
+            className={`
+              flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all
+              ${activeAccount === account.id
+                ? 'bg-white shadow-sm text-(--color-text-primary) border border-(--color-border-subtle)'
+                : 'text-(--color-text-muted) hover:text-(--color-text-secondary) hover:bg-(--color-bg-hover)'
+              }
+            `}
+          >
+            <span className={`w-2 h-2 rounded-full bg-${account.color}-500 shrink-0`} />
+            {account.name}
+          </button>
+        ))}
       </div>
 
       {/* Main content - two columns on desktop */}
@@ -406,13 +442,14 @@ export default function WhatsAppBroadcastPage() {
       </div>
 
       {/* Scheduled messages list */}
-      <ScheduledList onScheduleCreated={scheduleCreatedBump} />
+      <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />
 
       {/* Broadcast history (immediate sends log) */}
-      <BroadcastHistory refreshBump={broadcastHistoryBump} />
+      <BroadcastHistory accountId={activeAccount} refreshBump={broadcastHistoryBump} />
 
       {/* Schedule modal */}
       <ScheduleModal
+        accountId={activeAccount}
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
         message={message}
