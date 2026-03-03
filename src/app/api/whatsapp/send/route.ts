@@ -1,8 +1,11 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { env } from '~/env';
+import { getWebhookUrl } from '~/lib/config/whatsapp-accounts';
+import type { WhatsAppAccountId } from '~/lib/config/whatsapp-accounts';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB - Make.com webhook limit
+
+const VALID_ACCOUNT_IDS: WhatsAppAccountId[] = ['aiit-automation', 'susu-closets', 'gim-foundation', 'aiit-business'];
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,19 +14,22 @@ export async function POST(req: NextRequest) {
     const chatId = formData.get('chatId');
     const message = formData.get('message');
     const file = formData.get('file');
+    const accountIdRaw = formData.get('accountId');
 
     if (typeof chatId !== 'string' || !chatId) {
       return NextResponse.json({ error: 'chatId is required' }, { status: 400 });
+    }
+
+    if (typeof accountIdRaw !== 'string' || !VALID_ACCOUNT_IDS.includes(accountIdRaw as WhatsAppAccountId)) {
+      return NextResponse.json({ error: 'Valid accountId is required' }, { status: 400 });
     }
 
     if (file instanceof File && file.size > MAX_FILE_SIZE) {
       return NextResponse.json({ error: 'File exceeds 10MB limit' }, { status: 413 });
     }
 
-    const webhookUrl = env.MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL;
-    if (!webhookUrl) {
-      return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
-    }
+    const accountId = accountIdRaw as WhatsAppAccountId;
+    const webhookUrl = getWebhookUrl(accountId, 'sendMessage');
 
     // Forward as multipart/form-data so Make.com receives the file as binary
     const outForm = new FormData();
@@ -38,7 +44,6 @@ export async function POST(req: NextRequest) {
     const res = await fetch(webhookUrl, { method: 'POST', body: outForm });
 
     if (!res.ok) {
-      // Capture Make.com's error body (set by onerror WebhookRespond handlers in the scenario)
       let makeError = `Make.com webhook returned ${res.status}`;
       try {
         const body = await res.text();
