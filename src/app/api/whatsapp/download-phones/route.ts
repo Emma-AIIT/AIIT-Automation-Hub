@@ -1,7 +1,18 @@
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
+import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 
-export async function GET() {
+const VALID_ACCOUNT_IDS: WhatsAppAccountId[] = ['aiit-automation', 'susu-closets', 'gim-foundation', 'aiit-business'];
+
+export async function GET(req: NextRequest) {
+  const accountIdRaw = req.nextUrl.searchParams.get('accountId');
+
+  if (!accountIdRaw || !VALID_ACCOUNT_IDS.includes(accountIdRaw as WhatsAppAccountId)) {
+    return NextResponse.json({ error: 'Valid accountId is required' }, { status: 400 });
+  }
+
+  const accountId = accountIdRaw as WhatsAppAccountId;
   const supabase = createAdminClient();
   const PAGE_SIZE = 1000;
   let offset = 0;
@@ -13,6 +24,7 @@ export async function GET() {
     const { data: rows, error } = await supabase
       .from("whatsapp_group_participants")
       .select("participant_phone")
+      .eq("account_id", accountId)
       .like("participant_id", "%@c.us")
       .not("participant_phone", "is", null)
       .order("participant_id", { ascending: true })
@@ -38,7 +50,7 @@ export async function GET() {
   phones.sort((a, b) => a.localeCompare(b));
 
   const today = new Date().toISOString().slice(0, 10);
-  const filename = `whatsapp-contacts-${today}.txt`;
+  const filename = `whatsapp-contacts-${accountId}-${today}.txt`;
 
   return new NextResponse(phones.join("\n"), {
     headers: {
