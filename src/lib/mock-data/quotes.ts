@@ -298,7 +298,7 @@ export interface SidebarModule {
   id: string;
   label: string;
   route: string;
-  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp";
+  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp" | "receipt";
   badge?: { count: number; color: "red" | "blue" };
   disabled?: boolean;
   comingSoon?: boolean;
@@ -340,5 +340,11 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     label: "WhatsApp Groups & Participants",
     route: "/automations/whatsapp-participants",
     icon: "users",
+  },
+  {
+    id: "invoicing-logs",
+    label: "Invoicing Logs",
+    route: "/automations/invoicing-logs",
+    icon: "receipt",
   },
 ];

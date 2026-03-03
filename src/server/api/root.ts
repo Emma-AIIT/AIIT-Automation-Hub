@@ -8,6 +8,7 @@ import { vapiRouter } from "~/server/api/routers/vapi";
 import { ticketsRouter } from "~/server/api/routers/tickets";
 import { workersRouter } from "~/server/api/routers/workers";
 import { whatsappRouter } from "~/server/api/routers/whatsapp";
+import { invoicingRouter } from "~/server/api/routers/invoicing";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 
 /**
@@ -26,6 +27,7 @@ export const appRouter = createTRPCRouter({
   tickets: ticketsRouter,
   workers: workersRouter,
   whatsapp: whatsappRouter,
+  invoicing: invoicingRouter,
 });
 
 // export type definition of API

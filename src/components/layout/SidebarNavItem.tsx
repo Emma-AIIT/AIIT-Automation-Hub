@@ -6,7 +6,7 @@ import { useSidebar } from './SidebarContext';
 interface SidebarNavItemProps {
   href: string;
   label: string;
-  icon: 'dollar' | 'document' | 'users' | 'settings' | 'home' | 'phone' | 'ticket' | 'whatsapp';
+  icon: 'dollar' | 'document' | 'users' | 'settings' | 'home' | 'phone' | 'ticket' | 'whatsapp' | 'receipt';
   active?: boolean;
   badge?: { count: number; color: 'red' | 'blue' };
   disabled?: boolean;
@@ -66,6 +66,14 @@ const icons: Record<SidebarNavItemProps['icon'], React.ReactNode> = {
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <path d="M3 9h18" />
       <path d="M3 15h18" />
+    </svg>
+  ),
+  receipt: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z" />
+      <line x1="8" y1="10" x2="16" y2="10" />
+      <line x1="8" y1="14" x2="16" y2="14" />
+      <line x1="8" y1="18" x2="12" y2="18" />
     </svg>
   ),
 };
