@@ -4,13 +4,23 @@ import { useState, useCallback, useEffect } from 'react';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { DashboardGroup } from '@/server/api/routers/whatsapp';
+import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
+import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 const PARTICIPANTS_PAGE_SIZE = 25;
 
 export default function WhatsAppParticipantsPage() {
+  const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [participantPage, setParticipantPage] = useState(1);
+
+  const handleAccountSwitch = useCallback((id: WhatsAppAccountId) => {
+    setActiveAccount(id);
+    setSelectedGroupId(null);
+    setSearch('');
+    setParticipantPage(1);
+  }, []);
 
   const utils = api.useUtils();
   const {
@@ -19,16 +29,17 @@ export default function WhatsAppParticipantsPage() {
     isError: groupsError,
     error: groupsErrorMsg,
     refetch: refetchGroups,
-  } = api.whatsapp.getDashboardGroups.useQuery(undefined, {
-    staleTime: 30 * 1000,
-  });
+  } = api.whatsapp.getDashboardGroups.useQuery(
+    { accountId: activeAccount },
+    { staleTime: 30 * 1000 },
+  );
 
   const {
     data: participants = [],
     isLoading: participantsLoading,
     refetch: refetchParticipants,
   } = api.whatsapp.getParticipantsByGroupId.useQuery(
-    { groupId: selectedGroupId! },
+    { accountId: activeAccount, groupId: selectedGroupId! },
     { enabled: !!selectedGroupId }
   );
 
@@ -39,10 +50,10 @@ export default function WhatsAppParticipantsPage() {
     }
   }, [selectedGroupId, participants.length, utils.whatsapp.getDashboardGroups]);
 
-  // Reset to page 1 when switching groups
+  // Reset to page 1 when switching groups or accounts
   useEffect(() => {
     setParticipantPage(1);
-  }, [selectedGroupId]);
+  }, [selectedGroupId, activeAccount]);
 
   const totalParticipantPages = Math.max(1, Math.ceil(participants.length / PARTICIPANTS_PAGE_SIZE));
   const paginatedParticipants = participants.slice(
@@ -81,8 +92,8 @@ export default function WhatsAppParticipantsPage() {
       return;
     }
     toast.success('Sync request sent', { duration: 4000 });
-    syncMutation.mutate({ groupId: selectedGroupId, groupName: selectedGroup.group_name ?? '' });
-  }, [selectedGroupId, selectedGroup, syncMutation]);
+    syncMutation.mutate({ accountId: activeAccount, groupId: selectedGroupId, groupName: selectedGroup.group_name ?? '' });
+  }, [selectedGroupId, selectedGroup, syncMutation, activeAccount]);
 
   const filteredGroups = search.trim()
     ? dashboardGroups.filter(
@@ -156,6 +167,26 @@ export default function WhatsAppParticipantsPage() {
           </svg>
           Sync participants
         </button>
+      </div>
+
+      {/* Account Tabs */}
+      <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit">
+        {WHATSAPP_ACCOUNTS.map((account) => (
+          <button
+            key={account.id}
+            onClick={() => handleAccountSwitch(account.id)}
+            className={`
+              flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all
+              ${activeAccount === account.id
+                ? 'bg-white shadow-sm text-(--color-text-primary) border border-(--color-border-subtle)'
+                : 'text-(--color-text-muted) hover:text-(--color-text-secondary) hover:bg-(--color-bg-hover)'
+              }
+            `}
+          >
+            <span className={`w-2 h-2 rounded-full bg-${account.color}-500 shrink-0`} />
+            {account.name}
+          </button>
+        ))}
       </div>
 
       {/* Two columns: groups list | participants */}
@@ -255,11 +286,11 @@ export default function WhatsAppParticipantsPage() {
               ))
             )}
           </div>
-          {/* Download all numbers across all groups — direct API route, no clipboard involved */}
+          {/* Download all numbers across all groups for this account */}
           {dashboardGroups.length > 0 && (
             <div className="p-3 border-t border-(--color-border-subtle) bg-(--color-bg-secondary)">
               <a
-                href="/api/whatsapp/download-phones"
+                href={`/api/whatsapp/download-phones?accountId=${activeAccount}`}
                 download
                 className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg bg-[#25D366] text-white hover:bg-[#20b858] transition"
                 title="Download unique phone numbers from all groups as a .txt file"
