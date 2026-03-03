@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import type { BroadcastLogEntry } from '@/server/api/routers/whatsapp';
+import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 const SYDNEY_TZ = 'Australia/Sydney';
 
@@ -18,16 +19,18 @@ const STATUS_STYLES: Record<BroadcastLogEntry['status'], { dot: string; label: s
 };
 
 interface BroadcastHistoryProps {
+  accountId: WhatsAppAccountId;
   refreshBump?: number; // bump to trigger a refetch after a new send
 }
 
-export function BroadcastHistory({ refreshBump }: BroadcastHistoryProps) {
+export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  const { data: history = [], isLoading, refetch } = api.whatsapp.listBroadcastHistory.useQuery(undefined, {
-    refetchInterval: 60_000,
-  });
+  const { data: history = [], isLoading, refetch } = api.whatsapp.listBroadcastHistory.useQuery(
+    { accountId },
+    { refetchInterval: 60_000 },
+  );
 
   // Refetch when parent signals a new broadcast just completed
   const prevBump = { current: refreshBump };

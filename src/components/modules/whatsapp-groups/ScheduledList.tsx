@@ -4,6 +4,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { ScheduledMessage } from '@/server/api/routers/whatsapp';
+import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 const SYDNEY_TZ = 'Australia/Sydney';
 
@@ -19,13 +20,15 @@ const STATUS_STYLES: Record<ScheduledMessage['status'], { dot: string; label: st
 };
 
 interface ScheduledListProps {
+  accountId: WhatsAppAccountId;
   onScheduleCreated?: number; // bump this to trigger a refetch
 }
 
-export function ScheduledList({ onScheduleCreated }: ScheduledListProps) {
-  const { data: schedules = [], isLoading, refetch } = api.whatsapp.listScheduled.useQuery(undefined, {
-    refetchInterval: 30_000,
-  });
+export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListProps) {
+  const { data: schedules = [], isLoading, refetch } = api.whatsapp.listScheduled.useQuery(
+    { accountId },
+    { refetchInterval: 30_000 },
+  );
 
   const cancelMutation = api.whatsapp.cancelScheduled.useMutation({
     onSuccess: () => {
