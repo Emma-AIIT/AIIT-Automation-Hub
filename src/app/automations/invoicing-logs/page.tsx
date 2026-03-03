@@ -4,8 +4,7 @@ import { useState, useRef } from 'react';
 import { api } from '@/trpc/react';
 import { SkeletonStatsRow, Skeleton } from '@/components/ui/Skeleton';
 import type { InvoicingMessage } from '@/server/api/routers/invoicing';
-import { formatInTimeZone } from 'date-fns-tz';
-import { isToday, isThisWeek } from 'date-fns';
+import { format, isToday, isThisWeek } from 'date-fns';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -32,13 +31,11 @@ function getInitials(name: string | null, phone: string): string {
   return phone.replace(/\D/g, '').slice(-2);
 }
 
-const TZ = 'UTC';
-
 function formatReceivedAt(isoString: string): string {
-  const date = new Date(isoString + (isoString.endsWith('Z') || isoString.includes('+') ? '' : 'Z'));
-  if (isToday(date)) return `Today, ${formatInTimeZone(date, TZ, 'h:mm a')}`;
-  if (isThisWeek(date, { weekStartsOn: 1 })) return formatInTimeZone(date, TZ, 'EEE, h:mm a');
-  return formatInTimeZone(date, TZ, 'MMM d, h:mm a');
+  const date = new Date(isoString);
+  if (isToday(date)) return `Today, ${format(date, 'h:mm a')}`;
+  if (isThisWeek(date, { weekStartsOn: 1 })) return format(date, 'EEE, h:mm a');
+  return format(date, 'MMM d, h:mm a');
 }
 
 function formatPhone(phone: string): string {
