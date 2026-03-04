@@ -17,8 +17,8 @@ export type WhatsAppAccount = {
 
 export const WHATSAPP_ACCOUNTS: WhatsAppAccount[] = [
   { id: 'aiit-automation', name: 'AIIT Automation', color: 'blue' },
-  { id: 'susu-closets',    name: 'Susu Closets',    color: 'pink' },
-  { id: 'gim-foundation',  name: 'GIM Foundation',  color: 'green' },
+  // { id: 'susu-closets',    name: 'Susu Closets',    color: 'pink' },   // not set up yet
+  // { id: 'gim-foundation',  name: 'GIM Foundation',  color: 'green' },  // not set up yet
   { id: 'aiit-business',   name: 'AIIT Business',   color: 'amber' },
 ];
 
