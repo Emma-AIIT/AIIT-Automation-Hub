@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { fromZonedTime, formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
+import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 const SYDNEY_TZ = 'Australia/Sydney';
 
@@ -13,6 +14,7 @@ function getSydneyToday(): string {
 }
 
 interface ScheduleModalProps {
+  accountId: WhatsAppAccountId;
   isOpen: boolean;
   onClose: () => void;
   message: string;
@@ -21,7 +23,7 @@ interface ScheduleModalProps {
   onSuccess: () => void;
 }
 
-export function ScheduleModal({ isOpen, onClose, message, groupIds, groupNames, onSuccess }: ScheduleModalProps) {
+export function ScheduleModal({ accountId, isOpen, onClose, message, groupIds, groupNames, onSuccess }: ScheduleModalProps) {
   const [date, setDate] = useState('');
   const [time, setTime] = useState('09:00');
   const today = getSydneyToday();
@@ -52,6 +54,7 @@ export function ScheduleModal({ isOpen, onClose, message, groupIds, groupNames, 
 
     try {
       await scheduleMutation.mutateAsync({
+        accountId,
         groupIds,
         groupNames,
         message,
