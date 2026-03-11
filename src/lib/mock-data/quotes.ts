@@ -314,7 +314,7 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
   {
     id: "quote-pipeline",
     label: "Proposal Pipeline",
-    route: "/automations/proposal-pipeline",
+    route: "/automations/quote-pipeline",
     icon: "document",
   },
   {
