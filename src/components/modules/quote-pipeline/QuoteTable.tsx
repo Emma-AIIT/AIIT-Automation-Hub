@@ -224,7 +224,7 @@ export function QuoteTable() {
       {/* Mock data banner */}
       {useMockData && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 sm:px-4 py-3 text-xs sm:text-sm text-amber-800 dark:text-amber-200">
-          Quote Pipeline sync not configured. Using demo data. Add Make.com webhook URLs to enable live sync.
+          Proposal Pipeline sync not configured. Using demo data. Add Make.com webhook URLs to enable live sync.
         </div>
       )}
 
@@ -264,7 +264,7 @@ export function QuoteTable() {
           </div>
         ) : isError ? (
           <div className="py-12 text-center text-sm text-red-600 dark:text-red-400">
-            Failed to load quotes. Try refreshing.
+            Failed to load proposals. Try refreshing.
           </div>
         ) : (
           <>
@@ -290,7 +290,7 @@ export function QuoteTable() {
               ))}
               {paginated.length === 0 && (
                 <div className="px-4 py-12 text-center text-sm text-[var(--color-text-muted)]">
-                  No quotes found matching your filters.
+                  No proposals found matching your filters.
                 </div>
               )}
             </div>
@@ -349,7 +349,7 @@ export function QuoteTable() {
                   {paginated.length === 0 && (
                     <tr>
                       <td colSpan={7} className="text-center py-12 text-sm text-[var(--color-text-muted)]">
-                        No quotes found matching your filters.
+                        No proposals found matching your filters.
                       </td>
                     </tr>
                   )}

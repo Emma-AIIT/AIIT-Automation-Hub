@@ -270,7 +270,7 @@ export default function AutomationsDashboardPage() {
             href="/automations/debt-recovery"
           />
           <ModuleCard
-            title="Quote Pipeline"
+            title=" Pipeline"
             description="Convert leads to clients"
             icon={
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

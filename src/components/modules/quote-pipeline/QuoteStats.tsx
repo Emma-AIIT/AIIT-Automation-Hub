@@ -19,7 +19,7 @@ export function QuoteStats() {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
       <StatsCard
-        title="Total Quotes"
+        title="Total Proposals"
         value={totalQuotes}
         subtitle="All time"
         icon={
@@ -30,7 +30,7 @@ export function QuoteStats() {
         }
       />
       <StatsCard
-        title="Active Quotes"
+        title="Active Proposals"
         value={activeQuotes}
         subtitle="In pipeline"
         icon={
@@ -41,7 +41,7 @@ export function QuoteStats() {
         }
       />
       <StatsCard
-        title="Won Quotes"
+        title="Won Proposals"
         value={wonQuotes}
         subtitle="Converted"
         icon={

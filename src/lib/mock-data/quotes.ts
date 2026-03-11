@@ -313,8 +313,8 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
   },
   {
     id: "quote-pipeline",
-    label: "Quote Pipeline",
-    route: "/automations/quote-pipeline",
+    label: "Proposal Pipeline",
+    route: "/automations/proposal-pipeline",
     icon: "document",
   },
   {

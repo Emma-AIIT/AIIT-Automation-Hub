@@ -135,7 +135,7 @@ export const quotePipelineRouter = createTRPCRouter({
 
       return { quotes, useMockData: false };
     } catch (error) {
-      console.error("Error fetching quote pipeline from Make.com:", error);
+      console.error("Error fetching proposal pipeline from Make.com:", error);
       return { quotes: MOCK_QUOTES, useMockData: true };
     }
   }),
@@ -187,7 +187,7 @@ export const quotePipelineRouter = createTRPCRouter({
 
         return { success: true };
       } catch (error) {
-        console.error("Error updating quote pipeline via Make.com:", error);
+        console.error("Error updating proposal pipeline via Make.com:", error);
         throw new Error(
           error instanceof Error
             ? `Failed to update row: ${error.message}`
