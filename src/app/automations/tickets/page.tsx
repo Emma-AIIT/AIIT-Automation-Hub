@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { keepPreviousData } from '@tanstack/react-query';
 import { api } from '@/trpc/react';
 import { getWorkerColor } from '@/lib/worker-colors';
@@ -13,8 +14,12 @@ import { SkeletonStatsCard } from '@/components/ui/Skeleton';
 import type { TicketStatus } from '@/types/tickets';
 
 export default function TicketsPage() {
-  const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all' | 'unassigned'>('open');
-  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const idFromSearch = searchParams.get('id');
+  const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all' | 'unassigned'>(
+    idFromSearch ? 'all' : 'open'
+  );
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(idFromSearch);
   const [showWorkers, setShowWorkers] = useState(false);
   const [newWorkerName, setNewWorkerName] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
