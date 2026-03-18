@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { keepPreviousData } from '@tanstack/react-query';
 import { api } from '@/trpc/react';
@@ -13,7 +13,7 @@ import { CreateTicketModal } from '@/components/modules/tickets/CreateTicketModa
 import { SkeletonStatsCard } from '@/components/ui/Skeleton';
 import type { TicketStatus } from '@/types/tickets';
 
-export default function TicketsPage() {
+function TicketsPageInner() {
   const searchParams = useSearchParams();
   const idFromSearch = searchParams.get('id');
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all' | 'unassigned'>(
@@ -332,5 +332,13 @@ export default function TicketsPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function TicketsPage() {
+  return (
+    <Suspense>
+      <TicketsPageInner />
+    </Suspense>
   );
 }
