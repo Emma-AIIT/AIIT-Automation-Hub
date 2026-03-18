@@ -10,6 +10,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 interface ClientTableProps {
   clients: Client[];
   onClientClick?: (clientId: string) => void;
+  initialSearch?: string;
 }
 
 type SortField = 'name' | 'current_balance' | 'week_change' | 'streak_days' | 'status' | 'last_contact_date' | 'last_call_outcome';
@@ -50,7 +51,7 @@ function isToChase(client: Client): boolean {
 
 const ROW_EXIT_MS = 220;
 
-export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) => {
+export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick, initialSearch }) => {
   const utils = api.useUtils();
   const [leavingChaseIds, setLeavingChaseIds] = useState<Set<string>>(new Set());
 
@@ -63,7 +64,7 @@ export const ClientTable: FC<ClientTableProps> = ({ clients, onClientClick }) =>
     },
   });
 
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(initialSearch ?? '');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [balanceFilter, setBalanceFilter] = useState<string>('all');
   const [streakFilter, setStreakFilter] = useState<string>('all');
