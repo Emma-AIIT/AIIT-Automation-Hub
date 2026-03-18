@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/trpc/react';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { ClientTable } from '@/components/dashboard/ClientTable';
@@ -8,7 +9,9 @@ import { ClientDetailDrawer } from '@/components/dashboard/ClientDetailDrawer';
 import { SyncButton } from '@/components/dashboard/SyncButton';
 import { SkeletonStatsCard, SkeletonTable } from '@/components/ui/Skeleton';
 
-export default function DebtRecoveryPage() {
+function DebtRecoveryPageInner() {
+  const searchParams = useSearchParams();
+  const initialSearch = searchParams.get('search') ?? undefined;
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
 
   const { data: clients, isLoading: clientsLoading } = api.clients.getAll.useQuery({});
@@ -97,7 +100,7 @@ export default function DebtRecoveryPage() {
             <SkeletonTable rows={8} cols={6} />
           </div>
         ) : clients ? (
-          <ClientTable clients={clients} onClientClick={setSelectedClientId} />
+          <ClientTable clients={clients} onClientClick={setSelectedClientId} initialSearch={initialSearch} />
         ) : null}
       </div>
 
@@ -107,5 +110,13 @@ export default function DebtRecoveryPage() {
         onClose={() => setSelectedClientId(null)}
       />
     </div>
+  );
+}
+
+export default function DebtRecoveryPage() {
+  return (
+    <Suspense>
+      <DebtRecoveryPageInner />
+    </Suspense>
   );
 }

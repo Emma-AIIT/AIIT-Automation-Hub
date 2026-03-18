@@ -1,5 +1,6 @@
 import { postRouter } from "~/server/api/routers/post";
 import { clientsRouter } from "~/server/api/routers/clients";
+import { searchRouter } from "~/server/api/routers/search";
 import { webhooksRouter } from "~/server/api/routers/webhooks";
 import { syncRouter } from "~/server/api/routers/sync";
 import { quotePipelineRouter } from "~/server/api/routers/quotePipeline";
@@ -28,6 +29,7 @@ export const appRouter = createTRPCRouter({
   workers: workersRouter,
   whatsapp: whatsappRouter,
   invoicing: invoicingRouter,
+  search: searchRouter,
 });
 
 // export type definition of API
