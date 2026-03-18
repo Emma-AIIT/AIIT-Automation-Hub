@@ -5,12 +5,14 @@ import { usePathname, useRouter } from 'next/navigation';
 import { SIDEBAR_MODULES } from '@/lib/mock-data/quotes';
 import { SidebarNavItem } from './SidebarNavItem';
 import { useSidebar } from './SidebarContext';
+import { useSearch } from '@/components/search/SearchContext';
 import { createClient } from '@/lib/supabase/client';
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { collapsed, toggle, mobileOpen, closeMobile } = useSidebar();
+  const { openSearch } = useSearch();
 
   const handleSignOut = async () => {
     const supabase = createClient();
@@ -74,6 +76,29 @@ export function Sidebar() {
 
       {/* Divider */}
       <div className={`h-px bg-[var(--color-border-subtle)] ${collapsed ? 'mx-3' : 'mx-5'}`} />
+
+      {/* Search trigger */}
+      <div className="relative px-2 pt-3 pb-1">
+        <button
+          type="button"
+          onClick={openSearch}
+          className={`flex w-full items-center rounded-xl border border-[var(--color-border-subtle)] bg-gray-50 hover:bg-gray-100 transition-colors text-[var(--color-text-muted)] ${
+            collapsed ? 'justify-center p-2.5' : 'gap-2 px-3 py-2'
+          }`}
+          aria-label="Search (⌘K)"
+        >
+          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+          </svg>
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left text-[12px]">Search...</span>
+              <kbd className="text-[10px] border border-gray-200 rounded px-1 py-0.5">⌘K</kbd>
+            </>
+          )}
+        </button>
+      </div>
 
       {/* Navigation */}
       <nav className="relative flex-1 px-2 pt-5 pb-3 space-y-6 overflow-y-auto overflow-x-hidden">
