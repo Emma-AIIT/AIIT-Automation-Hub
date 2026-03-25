@@ -1,3 +1,10 @@
+/**
+ * workers router
+ *
+ * Manages the list of team members (workers) who can be assigned to support tickets.
+ * Workers are stored in the `workers` table — a simple name registry.
+ * The ticket assignment dropdowns read from this list.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { createClient } from "@/lib/supabase/server";

@@ -1,3 +1,11 @@
+/**
+ * invoicing router
+ *
+ * Read-only access to the invoicing_messages table, which logs WhatsApp messages
+ * received by the invoicing automation (text and image messages from clients).
+ * Make.com writes these records via a separate webhook — this router only reads them
+ * for display on the Invoicing Logs page.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { createClient } from "@/lib/supabase/server";

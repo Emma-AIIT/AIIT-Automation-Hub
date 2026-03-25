@@ -1,3 +1,12 @@
+/**
+ * root router — combines all tRPC sub-routers into the main app router.
+ *
+ * To add a new module:
+ *   1. Create a router file in /src/server/api/routers/
+ *   2. Import it here
+ *   3. Add it to the appRouter object with a descriptive key
+ *   4. The key becomes the namespace in the client: api.<key>.<procedure>()
+ */
 import { postRouter } from "~/server/api/routers/post";
 import { clientsRouter } from "~/server/api/routers/clients";
 import { searchRouter } from "~/server/api/routers/search";

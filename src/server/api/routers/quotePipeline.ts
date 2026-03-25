@@ -1,3 +1,18 @@
+/**
+ * quotePipeline router
+ *
+ * Reads and updates sales proposals/quotes from a Google Sheet via Make.com.
+ * The sheet is the source of truth — this router does NOT store quotes in Supabase.
+ *
+ * getRows:  POSTs to Make.com → Make.com reads Google Sheet → returns rows as JSON.
+ *           Falls back to MOCK_QUOTES if the webhook is not configured or fails.
+ *
+ * updateRow: POSTs a row number + updated field values to Make.com → Make.com writes
+ *            the cell(s) back to Google Sheet. Used for status and trigger updates.
+ *
+ * Sheet column layout is defined in the COL constant (0-based indices).
+ * Make.com may return rows in several different JSON shapes — getRows handles all of them.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "../trpc";
 import { env } from "~/env";

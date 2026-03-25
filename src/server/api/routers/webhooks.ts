@@ -1,8 +1,28 @@
+/**
+ * webhooks router
+ *
+ * Inbound endpoints called by Make.com automation workflows. These are the primary
+ * write paths for the Debt Recovery module's automated data — the frontend never
+ * calls these directly.
+ *
+ * Callers:
+ *   - syncXero     → Make.com Daily Xero Sync (6am) + Manual "Sync Now" button
+ *   - updatePayment → Make.com Payment Watcher (detects new Xero payments)
+ *   - logActivity  → Make.com Monday Outreach (VAPI calls, SMS, emails)
+ *
+ * UPSERT safety: syncXero only updates contact info and current_balance.
+ * It deliberately does NOT overwrite streak_days, previous_balance, status,
+ * or last_contact_date — those are managed by other Make.com workflows.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "../trpc";
 import { createClient } from "@/lib/supabase/server";
 
 export const webhooksRouter = createTRPCRouter({
+  // Bulk UPSERT of Xero contacts into the clients table.
+  // Called by Make.com after fetching all contacts from the Xero API.
+  // Conflict resolution is on xero_contact_id — existing records are updated,
+  // new contacts are inserted. Automation-managed fields are NOT touched here.
   syncXero: publicProcedure
     .input(
       z.object({
@@ -41,6 +61,10 @@ export const webhooksRouter = createTRPCRouter({
       return { success: true, count: input.clients.length };
     }),
 
+  // Called by Make.com Payment Watcher when Xero reports a paid invoice.
+  // Core payment detection logic: if newBalance < current_balance, a payment was made
+  // and the streak resets to 0. If balance is unchanged or increased, streak continues.
+  // Status thresholds (in days): 0 = current, ≤14 = warning, ≤21 = critical, >21 = suspended.
   updatePayment: publicProcedure
     .input(
       z.object({
@@ -98,6 +122,9 @@ export const webhooksRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  // Appends an activity entry (call, SMS, email, suspension notice) to the activity_log table
+  // and updates the client's last_contact_date. Called by Make.com Monday Outreach workflow
+  // after each outreach action completes.
   logActivity: publicProcedure
     .input(
       z.object({

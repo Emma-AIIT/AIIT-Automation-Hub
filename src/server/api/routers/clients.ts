@@ -1,8 +1,20 @@
+/**
+ * clients router
+ *
+ * Handles reading and updating client records for the Debt Recovery module.
+ * Client data is primarily written by Make.com automations (Xero sync, streak tracker).
+ * The frontend only reads data and can update the `chase` flag.
+ *
+ * IMPORTANT: Never update streak_weeks, previous_balance, status, or last_contact_date
+ * from this router — those fields are owned by Make.com workflows.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "../trpc";
 import { createClient } from "@/lib/supabase/server";
 
 export const clientsRouter = createTRPCRouter({
+  // Toggles whether a client should be actively chased for payment.
+  // 'to_chase' = include in outreach, 'do_not_chase' = skip automated contact.
   setChase: publicProcedure
     .input(
       z.object({
@@ -22,6 +34,8 @@ export const clientsRouter = createTRPCRouter({
       return data;
     }),
 
+  // Returns all clients, optionally filtered by payment status and/or search term.
+  // Results are sorted by streak_days descending (most overdue first).
   getAll: publicProcedure
     .input(
       z.object({
@@ -51,6 +65,9 @@ export const clientsRouter = createTRPCRouter({
       return data;
     }),
 
+  // Aggregates key stats for the dashboard stats cards:
+  // total outstanding balance, client count, at-risk count, suspended count, collection rate.
+  // Collection rate is a simplified calculation — paid = balance < previous_balance.
   getStats: publicProcedure.query(async () => {
     const supabase = await createClient();
     
@@ -76,6 +93,8 @@ export const clientsRouter = createTRPCRouter({
     };
   }),
 
+  // Returns a single client with their full activity log and weekly balance snapshots.
+  // Used to populate the client detail drawer.
   getById: publicProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ input }) => {

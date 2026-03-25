@@ -1,3 +1,17 @@
+/**
+ * Next.js middleware — runs on every request before the page renders.
+ *
+ * Auth flow:
+ *   1. Refreshes the Supabase session cookie (keeps users logged in across tabs).
+ *   2. Unauthenticated users visiting any non-/login, non-/api route → redirect to /login.
+ *   3. Authenticated users visiting /login → redirect to /automations.
+ *
+ * API routes (/api/*) are excluded from auth checks — they handle their own
+ * authentication via CRON_SECRET or WHATSAPP_IMPORT_SECRET bearer tokens.
+ *
+ * Static assets (_next/static, _next/image, favicon, og-image) are excluded
+ * via the matcher config to avoid unnecessary middleware overhead.
+ */
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 

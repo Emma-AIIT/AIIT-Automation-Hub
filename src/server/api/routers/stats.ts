@@ -1,7 +1,17 @@
+/**
+ * stats router
+ *
+ * Aggregates top-level metrics for the main /automations dashboard page.
+ * Combines debt recovery stats (from Supabase) with voice agent stats (currently hardcoded).
+ *
+ * Note: `agents.active` and `agents.callsToday` are hardcoded placeholders.
+ * Wire these up to the VAPI router once live call counting is needed.
+ */
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { createClient } from "@/lib/supabase/server";
 
 export const statsRouter = createTRPCRouter({
+  // Returns combined debt + agent overview stats for the main dashboard.
   getOverview: publicProcedure.query(async () => {
     const supabase = await createClient();
 

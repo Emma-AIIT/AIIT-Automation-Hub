@@ -1,3 +1,11 @@
+/**
+ * search router
+ *
+ * Powers the global Cmd+K / Ctrl+K search palette.
+ * Searches clients, tickets, and quotes simultaneously using Supabase ilike queries.
+ * Results are returned as navigation-ready items with hrefs that pre-filter or open
+ * the relevant module page/drawer.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "../trpc";
 import { createClient } from "@/lib/supabase/server";
@@ -18,6 +26,9 @@ export type SearchResults = {
 };
 
 export const searchRouter = createTRPCRouter({
+  // Runs three parallel Supabase queries (clients, tickets, quotes) and returns up to 5 results
+  // per module. Results include an `href` for direct navigation from the search palette.
+  // Minimum query length is 2 characters to avoid overly broad matches.
   global: publicProcedure
     .input(z.object({ query: z.string().min(2).max(100) }))
     .query(async ({ input }): Promise<SearchResults> => {

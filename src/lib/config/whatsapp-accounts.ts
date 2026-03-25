@@ -1,3 +1,26 @@
+/**
+ * whatsapp-accounts config
+ *
+ * Defines the WhatsApp accounts managed by this hub and resolves their Make.com webhook URLs.
+ * Each account maps to a separate Green API instance and a set of Make.com scenarios.
+ *
+ * Active accounts:
+ *   - aiit-automation: AIIT Automation (fully active)
+ *
+ * Configured but inactive (tabs hidden in UI — un-comment in WHATSAPP_ACCOUNTS to enable):
+ *   - susu-closets:   Susu Closets
+ *   - gim-foundation: GIM Foundation
+ *
+ * To add a new account:
+ *   1. Add to WhatsAppAccountId union type
+ *   2. Add entry to WHATSAPP_ACCOUNTS array
+ *   3. Add 3 env vars: MAKE_WHATSAPP_<NAME>_PULL_GROUPS_WEBHOOK_URL,
+ *      _SEND_MESSAGE_WEBHOOK_URL, _PULL_PARTICIPANTS_WEBHOOK_URL
+ *   4. Add env vars to .env, .env.example, env.js, and Vercel dashboard
+ *   5. Add entry to getWebhookUrl() map below
+ *
+ * SERVER-SIDE ONLY — do not import this file in client components.
+ */
 import { env } from '~/env';
 
 export type WhatsAppAccountId =

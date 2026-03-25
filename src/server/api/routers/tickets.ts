@@ -1,3 +1,20 @@
+/**
+ * tickets router
+ *
+ * Manages support tickets ingested from the Outlook inbox via Make.com.
+ * Make.com watches the inbox, uses GPT to extract caller name/business/inquiry,
+ * then POSTs to /api/create-ticket, which inserts a row into support_tickets.
+ *
+ * Key flows:
+ *   - getAll / getById  → display ticket list and detail drawer
+ *   - pullNew           → manually trigger Make.com to pull fresh tickets from Outlook
+ *   - sendReply         → insert reply row + POST to Make.com email webhook → Outlook
+ *   - getReplies        → fetch full email thread for a ticket
+ *   - delete/deleteMany → admin cleanup; also removes Supabase Storage attachments
+ *   - bulk*             → batch status/assignment/priority updates from the ticket list
+ *
+ * Attachment URLs are signed (1hr expiry) — generate fresh URLs per request, don't cache.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { createClient } from "@/lib/supabase/server";
@@ -86,6 +103,8 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  // Appends a timestamped note to the ticket's notes field (plain text, newline-separated).
+  // Notes are internal only — not sent to the customer.
   addNote: publicProcedure
     .input(z.object({
       id: z.string().uuid(),
@@ -119,6 +138,8 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  // Deletes ticket and all associated Supabase Storage attachments.
+  // Uses admin client (service role) to bypass RLS for storage operations.
   delete: publicProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {
@@ -350,6 +371,9 @@ export const ticketsRouter = createTRPCRouter({
       return data as SupportTicket;
     }),
 
+  // Triggers Make.com to pull new tickets from the Outlook inbox.
+  // Make.com runs GPT parsing on each email and POSTs results back to /api/create-ticket.
+  // This is a fire-and-trigger — Make.com runs asynchronously after we return success.
   pullNew: publicProcedure.mutation(async () => {
     const webhookUrl = env.MAKE_PULL_TICKETS_WEBHOOK_URL;
 
@@ -427,6 +451,10 @@ export const ticketsRouter = createTRPCRouter({
       return (data ?? []) as TicketReply[];
     }),
 
+  // Sends an outbound email reply via Outlook through Make.com.
+  // Flow: insert reply row in ticket_replies → POST to Make.com email webhook → Outlook sends email.
+  // Sets proper email threading headers (In-Reply-To, References) for inbox threading.
+  // Only supported for tickets with source='email' and a valid caller_email.
   sendReply: publicProcedure
     .input(z.object({
       ticketId: z.string().uuid(),

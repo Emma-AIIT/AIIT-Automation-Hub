@@ -1,3 +1,22 @@
+/**
+ * whatsapp router
+ *
+ * Manages WhatsApp groups, broadcasts, participant lists, and scheduled messages
+ * across multiple accounts (currently: AIIT Automation; Susu Closets and GIM Foundation
+ * are configured but tabs are hidden until fully set up).
+ *
+ * Architecture:
+ *   - Group and participant data is cached in Supabase (whatsapp_groups, whatsapp_group_participants).
+ *   - Reads come from Supabase cache (fast, no Make.com call).
+ *   - Syncs (groups, participants) trigger Make.com → Green API → Supabase upsert.
+ *   - Broadcasts are sent via Make.com → Green API → WhatsApp.
+ *
+ * All procedures accept `accountId` to scope operations to a specific WhatsApp account.
+ * getWebhookUrl() resolves the correct Make.com webhook URL for each account + action.
+ *
+ * syncParticipants is fire-and-forget — large groups (600+ participants) would time out
+ * the client if we waited for Make.com to respond.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { TRPCError } from "@trpc/server";
@@ -205,6 +224,8 @@ export const whatsappRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  // Returns pending messages + sent/failed messages from the last 24 hours.
+  // Older completed messages are excluded to keep the list manageable.
   listScheduled: publicProcedure
     .input(z.object({ accountId: accountIdSchema }))
     .query(async ({ input }): Promise<ScheduledMessage[]> => {
@@ -280,6 +301,8 @@ export const whatsappRouter = createTRPCRouter({
       })) as DashboardGroup[];
     }),
 
+  // Reads all participants for a group from Supabase cache, paginating in batches of 1000
+  // to handle large groups. Sorted by phone number ascending.
   getParticipantsByGroupId: publicProcedure
     .input(z.object({ accountId: accountIdSchema, groupId: z.string().min(1) }))
     .query(async ({ input }): Promise<ParticipantEntry[]> => {

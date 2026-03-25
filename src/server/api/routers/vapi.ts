@@ -1,3 +1,16 @@
+/**
+ * vapi router
+ *
+ * Fetches call data and metrics directly from the VAPI REST API.
+ * All data is live — nothing is cached in Supabase. Results reflect the
+ * current state of the VAPI account at query time.
+ *
+ * VAPI API key is required (VAPI_API_KEY env var). All procedures will throw
+ * if the key is missing.
+ *
+ * Note: VAPI call recording URLs expire after 30 days. Download to Supabase
+ * Storage if long-term retention is needed.
+ */
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { env } from "~/env";
@@ -33,6 +46,8 @@ interface DailyMetric {
 }
 
 export const vapiRouter = createTRPCRouter({
+  // Fetches up to 1000 calls from VAPI and aggregates them into per-day call counts and cost.
+  // Used to power the VapiMetricsChart on the Voice Agents page.
   getDailyMetrics: publicProcedure
     .input(z.object({
       days: z.number().default(30),
