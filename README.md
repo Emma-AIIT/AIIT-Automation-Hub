@@ -1,52 +1,71 @@
-# Debt Recovery Hub
+# AIIT Automation Hub
 
-A professional debt collection management dashboard built with the T3 Stack and Supabase.
+Internal business automation platform for **All In IT Solutions** — replacing manual Google Sheets workflows with real-time dashboards and automated outreach.
 
-## Setup
+**Live URL**: https://debt-recovery-hub-rho.vercel.app/
+**Stack**: Next.js 15 · tRPC · Supabase · Tailwind CSS · Make.com
 
-### 1. Environment Variables
+---
 
-Create a `.env` file in the root directory with the following variables:
+## Modules
 
-```env
-# Supabase Configuration
-# Get these values from your Supabase project settings:
-# https://supabase.com/dashboard/project/_/settings/api
+| Module | Description |
+|--------|-------------|
+| **Debt Recovery** | Client balance tracking, payment streak monitoring, automated collection outreach |
+| **Tickets** | Support ticket management with email ingestion and VAPI call integration |
+| **Quote Pipeline** | Sales proposal/quote tracking synced from Xero via Make.com |
+| **Voice Agents** | VAPI-powered inbound/outbound AI call dashboard and call log viewer |
+| **WhatsApp Groups** | Broadcast messaging to WhatsApp groups across multiple accounts |
+| **Invoicing Logs** | Invoicing transaction and activity log viewer |
 
-NEXT_PUBLIC_SUPABASE_URL=your-project-url-here
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
-```
+---
 
-### 2. Install Dependencies
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 15 (App Router), React 19, TypeScript |
+| API | tRPC 11, TanStack Query, Zod |
+| Database | Supabase (PostgreSQL) |
+| Automation | Make.com (webhooks, scheduled flows) |
+| Voice | VAPI AI calling |
+| Styling | Tailwind CSS 4, dark theme |
+| Deployment | Vercel |
+
+---
+
+## Quick Start
+
+### 1. Clone and install
 
 ```bash
+git clone <repo-url>
+cd aiit-automation-hub
 npm install
 ```
 
-### 3. Run Development Server
+### 2. Set up environment variables
+
+```bash
+cp .env.example .env
+```
+
+Fill in your values — see `.env.example` for all required variables and descriptions. Get the real values from the team (Zimraan or Ali).
+
+### 3. Run dev server
 
 ```bash
 npm run dev
 ```
 
-## Tech Stack
+Open [http://localhost:3000](http://localhost:3000) — it redirects to `/automations`.
 
-- [Next.js](https://nextjs.org)
-- [Supabase](https://supabase.com)
-- [Tailwind CSS](https://tailwindcss.com)
-- [tRPC](https://trpc.io)
-- [TypeScript](https://www.typescriptlang.org/)
+### 4. Database
 
-## Learn More
+The database is hosted on Supabase. No local DB setup needed. Migrations are in `/supabase/migrations/` and are applied manually via the Supabase dashboard or CLI.
 
-To learn more about the [T3 Stack](https://create.t3.gg/), take a look at the following resources:
+---
 
-- [Documentation](https://create.t3.gg/)
-- [Learn the T3 Stack](https://create.t3.gg/en/faq#what-learning-resources-are-currently-available) — Check out these awesome tutorials
+## Full Documentation
 
-You can check out the [create-t3-app GitHub repository](https://github.com/t3-oss/create-t3-app) — your feedback and contributions are welcome!
-
-## How do I deploy this?
-
-Follow our deployment guides for [Vercel](https://create.t3.gg/en/deployment/vercel), [Netlify](https://create.t3.gg/en/deployment/netlify) and [Docker](https://create.t3.gg/en/deployment/docker) for more information.
+For architecture, module deep-dives, Make.com integration map, deployment guide, and known gotchas — see [HANDOVER.md](./HANDOVER.md).
