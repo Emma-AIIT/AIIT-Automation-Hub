@@ -1,3 +1,7 @@
+/**
+ * TypeScript types for the core Supabase database tables used by the Debt Recovery module.
+ * Includes `Client`, `WeeklySnapshot`, `ActivityLog`, and the `ClientWithRelations` composite type.
+ */
 export type ChaseStatus = 'to_chase' | 'do_not_chase'
 
 export type Client = {

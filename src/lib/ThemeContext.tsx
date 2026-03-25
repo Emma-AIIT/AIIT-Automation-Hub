@@ -1,3 +1,8 @@
+/**
+ * Theme context and provider for the dashboard.
+ * Persists the user's dark/light preference in localStorage and syncs it to the
+ * `data-theme` attribute on `<html>`. Exposes a `useTheme` hook for consuming components.
+ */
 'use client';
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';

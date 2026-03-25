@@ -1,3 +1,8 @@
+/**
+ * Factory function for the shared TanStack QueryClient used by tRPC.
+ * Configures a 30-second staleTime for SSR compatibility and wires SuperJSON
+ * as the serializer/deserializer for dehydration and hydration.
+ */
 import {
   defaultShouldDehydrateQuery,
   QueryClient,

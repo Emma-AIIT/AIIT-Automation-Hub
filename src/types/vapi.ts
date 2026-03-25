@@ -1,3 +1,8 @@
+/**
+ * TypeScript interfaces for the VAPI voice-agent integration.
+ * Defines `VapiAssistant`, `VapiCall` (with cost breakdown, transcript, and analysis),
+ * and `AgentConfig` used to configure inbound/outbound phone agents.
+ */
 export interface VapiAssistant {
   id: string;
   name: string;

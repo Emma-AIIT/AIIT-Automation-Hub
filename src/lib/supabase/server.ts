@@ -1,3 +1,7 @@
+/**
+ * Server-side Supabase client factory using the service role key and Next.js cookie store.
+ * Intended for use in Server Components and API routes where request cookies must be forwarded.
+ */
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 

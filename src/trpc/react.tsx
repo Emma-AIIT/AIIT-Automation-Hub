@@ -1,3 +1,8 @@
+/**
+ * Client-side tRPC setup for React components.
+ * Exports the typed `api` client, `RouterInputs`/`RouterOutputs` inference helpers,
+ * and `TRPCReactProvider` which wires together QueryClient and the tRPC HTTP batch-stream link.
+ */
 "use client";
 
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";

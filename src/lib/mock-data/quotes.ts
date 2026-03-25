@@ -1,3 +1,8 @@
+/**
+ * Mock data and type definitions for the Proposal Pipeline module.
+ * Exports the `Quote` interface, a `MOCK_QUOTES` array of sample quote records,
+ * and the `SIDEBAR_MODULES` configuration that drives the main navigation sidebar.
+ */
 export interface Quote {
   id: number;
   businessName: string;

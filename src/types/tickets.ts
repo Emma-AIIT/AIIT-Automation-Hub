@@ -1,3 +1,8 @@
+/**
+ * TypeScript interfaces and union types for the IT Support ticketing module.
+ * Covers `SupportTicket`, `TicketAttachment`, and `TicketReply`, including
+ * all status, priority, source, and email threading fields.
+ */
 export type TicketStatus = 'open' | 'in-progress' | 'resolved';
 
 export type TicketPriority = 'high' | 'low' | null;

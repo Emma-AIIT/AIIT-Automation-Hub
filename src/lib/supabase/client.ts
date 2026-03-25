@@ -1,3 +1,7 @@
+/**
+ * Browser-side Supabase client factory using the public anon key.
+ * Use this in Client Components (`'use client'`) where cookie-based auth is not required.
+ */
 import { createBrowserClient } from '@supabase/ssr'
 
 export const createClient = () => {

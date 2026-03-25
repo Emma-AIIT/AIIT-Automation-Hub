@@ -1,3 +1,8 @@
+/**
+ * Server-side tRPC helpers for React Server Components.
+ * Creates a cached tRPC context and caller, then exposes `api` (the RSC-safe tRPC client)
+ * and `HydrateClient` for prefetching queries that are dehydrated into the client.
+ */
 import "server-only";
 
 import { createHydrationHelpers } from "@trpc/react-query/rsc";
