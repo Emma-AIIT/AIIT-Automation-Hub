@@ -1,3 +1,17 @@
+/**
+ * Debt Recovery page — displays aggregate payment stats (total outstanding, at-risk, suspended)
+ * and a filterable client table. Reads an optional `?search=` URL param (set by the search
+ * palette) to pre-filter the client list. Clicking a client opens the ClientDetailDrawer.
+ * Wrapped in Suspense to support useSearchParams on the client side.
+ */
+/**
+ * Debt Recovery module page at /automations/debt-recovery.
+ * Displays four KPI cards (total outstanding, total clients, at-risk, suspended),
+ * a searchable/filterable client table, and a slide-over ClientDetailDrawer.
+ * Reads an optional ?search= URL param to pre-filter the table (used by the
+ * SearchPalette when navigating directly to a client). Wrapped in Suspense to
+ * support useSearchParams in a client component.
+ */
 'use client';
 
 import { useState, Suspense } from 'react';

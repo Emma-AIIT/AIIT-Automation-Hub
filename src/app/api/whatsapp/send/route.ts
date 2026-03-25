@@ -1,3 +1,11 @@
+/**
+ * POST /api/whatsapp/send
+ * Proxy endpoint called by the WhatsApp Broadcast page when sending an image attachment.
+ * Accepts multipart/form-data (chatId, accountId, optional message, optional file) and
+ * forwards it as multipart to the account-specific Make.com send-message webhook so
+ * Make.com receives the file as binary. Text-only messages bypass this route and go
+ * directly via tRPC. Enforces a 10 MB file size limit and validates the accountId.
+ */
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getWebhookUrl } from '~/lib/config/whatsapp-accounts';

@@ -1,3 +1,18 @@
+/**
+ * IT Support Tickets page — lists support tickets with real-time Supabase updates via a
+ * postgres_changes subscription. Supports filtering by status (open/in-progress/resolved/unassigned),
+ * creating tickets manually, pulling new tickets from the external source, and managing workers.
+ * An `?id=` URL param opens the matching ticket drawer immediately (used by search palette navigation).
+ * Wrapped in Suspense to support useSearchParams.
+ */
+/**
+ * IT Support Tickets page at /automations/tickets.
+ * Shows filterable status cards (open, in-progress, resolved, unassigned), a ticket
+ * list, and a full-screen TicketDetail drawer. Subscribes to Supabase real-time
+ * INSERT events on support_tickets so new tickets appear without a manual refresh.
+ * Reads an optional ?id= URL param to open a specific ticket immediately (used by
+ * the SearchPalette). Also exposes a Workers management panel for assigning tickets.
+ */
 'use client';
 
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react';

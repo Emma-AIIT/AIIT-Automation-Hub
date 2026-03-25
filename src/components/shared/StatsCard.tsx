@@ -1,3 +1,8 @@
+/**
+ * StatsCard - Reusable metric card used across module dashboards.
+ * Displays a title, primary value, optional subtitle, icon, and an optional trend
+ * indicator (value + positive/negative direction) in a dark-themed card layout.
+ */
 interface StatsCardProps {
   title: string;
   value: string;

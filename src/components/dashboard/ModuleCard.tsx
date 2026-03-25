@@ -1,3 +1,9 @@
+/**
+ * ModuleCard
+ * A summary card for an automation module showing its title, description, icon, and key stats.
+ * When active, the card is a Next.js Link that navigates to the module's route.
+ * Inactive modules display a "Coming soon" overlay and are not clickable.
+ */
 'use client';
 
 import { type FC, type ReactNode } from 'react';

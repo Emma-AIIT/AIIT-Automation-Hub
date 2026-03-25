@@ -1,3 +1,11 @@
+/**
+ * POST /api/create-ticket
+ * Called by Make.com (and optionally VAPI webhook) to create a new support ticket.
+ * Accepts caller details, inquiry text, optional email threading fields, and an array
+ * of attachment metadata. Inserts into support_tickets and, if attachments are
+ * provided, into ticket_attachments. Returns the created ticket record on success.
+ * No authentication is enforced — secure by keeping the URL private in Make.com.
+ */
 import { type NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { z } from 'zod';

@@ -1,3 +1,8 @@
+/**
+ * BroadcastHistory - Paginated history of sent WhatsApp broadcast messages.
+ * Fetches broadcast log entries for a given WhatsApp account via tRPC and displays
+ * each entry's timestamp (Sydney timezone), target groups, message preview, and delivery status.
+ */
 'use client';
 
 import { useState } from 'react';

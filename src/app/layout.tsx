@@ -1,3 +1,12 @@
+/**
+ * Root layout — wraps the entire app with the DM Sans font, tRPC provider, and global toast
+ * notifications. Also defines site-wide OpenGraph and Twitter metadata for Vercel deployments.
+ */
+/**
+ * Root layout for the entire application.
+ * Wraps every page with the DM Sans font, the tRPC React provider, and the global
+ * toast notification layer. Also defines site-wide metadata and Open Graph tags.
+ */
 import "@/styles/globals.css";
 import { type Metadata } from "next";
 import { DM_Sans } from "next/font/google";

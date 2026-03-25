@@ -1,3 +1,8 @@
+/**
+ * SidebarMain
+ * Layout wrapper that offsets page content to account for the sidebar width (collapsed or expanded).
+ * On mobile it renders a fixed header bar with a hamburger button that opens the sidebar overlay.
+ */
 'use client';
 
 import { useSidebar } from './SidebarContext';

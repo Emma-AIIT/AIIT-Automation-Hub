@@ -1,3 +1,8 @@
+/**
+ * TicketDetail - Full detail view for a single support ticket.
+ * Displays ticket metadata, attachments, and reply thread; allows updating status,
+ * priority, and assignee inline, and supports posting new replies via tRPC mutations.
+ */
 'use client';
 
 import { type FC, useState } from 'react';

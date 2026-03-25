@@ -1,3 +1,8 @@
+/**
+ * AgentCard - Display card for a single VAPI voice agent configuration.
+ * Shows the agent's name, description, live status (active/idle/on-call), and the
+ * number of calls made in the selected date range.
+ */
 'use client';
 
 import { type FC } from 'react';

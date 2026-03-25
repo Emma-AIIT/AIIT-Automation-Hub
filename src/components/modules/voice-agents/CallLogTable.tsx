@@ -1,3 +1,8 @@
+/**
+ * CallLogTable - Tabular log of VAPI voice calls for the voice agents module.
+ * Accepts a list of VapiCall records and renders caller, date/time, duration, and
+ * effective call status; emits onSelectCall when a row is clicked to open the detail drawer.
+ */
 'use client';
 
 import { type FC } from 'react';

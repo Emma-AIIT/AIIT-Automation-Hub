@@ -1,3 +1,11 @@
+/**
+ * GET /api/cron/whatsapp
+ * Cron endpoint — called by Vercel Cron (secured with CRON_SECRET bearer token).
+ * Fetches all pending scheduled_messages whose scheduled_at time has passed,
+ * then fans out each message to its target group IDs via the Make.com
+ * MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL. Updates each row to "sent" or "failed"
+ * depending on whether all group sends succeeded.
+ */
 import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 

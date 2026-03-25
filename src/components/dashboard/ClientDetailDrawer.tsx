@@ -1,3 +1,9 @@
+/**
+ * ClientDetailDrawer
+ * A slide-in drawer that displays full details for a selected debt-recovery client,
+ * including outstanding balance, payment streak, weekly snapshot history, recent activity log,
+ * and contact links. Fetches data via tRPC and supports ESC-key and backdrop-click dismissal.
+ */
 'use client';
 
 import { type FC, useEffect, useRef, useCallback } from 'react';

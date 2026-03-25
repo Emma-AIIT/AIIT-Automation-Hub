@@ -1,3 +1,11 @@
+/**
+ * WhatsApp Groups & Participants page at /automations/whatsapp-participants.
+ * Shows a searchable list of dashboard groups for the active account, and displays
+ * paginated participant phone numbers and names for the selected group. Supports
+ * syncing participants from WhatsApp via Make.com, copying numbers to clipboard, and
+ * downloading all unique phone numbers across all groups as a .txt file. Contacts with
+ * LID/private IDs are flagged as unextractable and excluded from number exports.
+ */
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';

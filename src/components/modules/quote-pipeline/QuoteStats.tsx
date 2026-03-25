@@ -1,3 +1,8 @@
+/**
+ * QuoteStats - Summary stats bar for the quote pipeline module.
+ * Fetches all quotes via tRPC and derives totals for total value, won, lost, and in-progress
+ * quotes, rendering each as a StatsCard with a skeleton loader while data is fetching.
+ */
 'use client';
 
 import { api } from '@/trpc/react';

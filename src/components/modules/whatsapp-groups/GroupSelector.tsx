@@ -1,3 +1,8 @@
+/**
+ * GroupSelector - Multi-select list of WhatsApp groups with a compose area for sending broadcasts.
+ * Supports search filtering, select-all toggling, and message composition; triggers an
+ * immediate send mutation via the parent-supplied onSend callback with selected group IDs and message text.
+ */
 'use client';
 
 import { useState, useMemo } from 'react';

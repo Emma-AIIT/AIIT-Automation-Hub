@@ -1,3 +1,9 @@
+/**
+ * QuoteTable - Filterable, sortable table of quotes for the quote pipeline module.
+ * Fetches quote rows via tRPC, applies client-side filtering from QuoteFilters, and opens
+ * a QuoteDetailDrawer when a row is selected. Supports URL-driven pre-selection via
+ * the ?quote= search param.
+ */
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';

@@ -1,3 +1,14 @@
+/**
+ * Quote Pipeline (Proposal Pipeline) page — shows summary stats and a filterable table of
+ * proposals sourced from Google Sheets. Provides a (stub) CSV export button. All data
+ * fetching and display is delegated to the QuoteStats and QuoteTable components.
+ */
+/**
+ * Proposal Pipeline page at /automations/quote-pipeline.
+ * Renders proposal KPI stats and a sortable/filterable QuoteTable sourced from
+ * Google Sheets via the quotePipeline tRPC router. Provides a placeholder CSV
+ * export button for future implementation.
+ */
 import { QuoteStats } from '@/components/modules/quote-pipeline/QuoteStats';
 import { QuoteTable } from '@/components/modules/quote-pipeline/QuoteTable';
 

@@ -1,3 +1,11 @@
+/**
+ * GET /api/whatsapp/download-phones?accountId=<id>
+ * Called directly by the browser (anchor download link) from the Participants page.
+ * Paginates through whatsapp_group_participants for the given account, deduplicates
+ * phone numbers (only @c.us contacts with a non-null phone), sorts them, and returns
+ * a plain-text file for download named whatsapp-contacts-{accountId}-{date}.txt.
+ * No auth required — access is limited by knowing the URL.
+ */
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";

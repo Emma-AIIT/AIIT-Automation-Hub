@@ -1,3 +1,8 @@
+/**
+ * ScheduledList - List of pending scheduled WhatsApp broadcast messages.
+ * Fetches upcoming scheduled messages for a given account via tRPC and renders each
+ * entry with its send time (Sydney timezone), target groups, message preview, and a cancel action.
+ */
 'use client';
 
 import { formatInTimeZone } from 'date-fns-tz';

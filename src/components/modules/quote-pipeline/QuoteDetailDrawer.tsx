@@ -1,3 +1,8 @@
+/**
+ * QuoteDetailDrawer - Slide-in drawer that displays the full details of a selected quote.
+ * Renders quote metadata, status, source, and line items for the quote pipeline module.
+ * Closes when the user clicks outside or triggers the onClose callback.
+ */
 'use client';
 
 import type { Quote } from '@/lib/mock-data/quotes';

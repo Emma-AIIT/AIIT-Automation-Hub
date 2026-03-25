@@ -1,3 +1,9 @@
+/**
+ * TicketList - Scrollable, filterable list of support tickets.
+ * Renders ticket rows with status, priority, source, and assignee; supports inline
+ * status updates, URL-driven pre-selection via the ?ticket= param, and a portal-based
+ * context menu for quick actions.
+ */
 'use client';
 
 import { type FC, memo, useState, useCallback, useRef, useLayoutEffect } from 'react';

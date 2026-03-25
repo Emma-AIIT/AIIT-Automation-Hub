@@ -1,3 +1,8 @@
+/**
+ * VapiMetricsChart
+ * Renders two side-by-side Recharts AreaCharts showing daily VAPI voice-call volume
+ * and cumulative cost over a given period, along with period totals for each metric.
+ */
 'use client';
 
 import { type FC } from 'react';

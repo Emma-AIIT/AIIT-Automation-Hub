@@ -1,3 +1,8 @@
+/**
+ * CreateTicketModal - Modal form for creating a new support ticket.
+ * Collects title, description, priority, source, and assignee (worker), then submits
+ * via tRPC mutation with optimistic UI feedback using react-hot-toast.
+ */
 'use client';
 
 import { type FC, useState, useRef, useEffect, useCallback } from 'react';

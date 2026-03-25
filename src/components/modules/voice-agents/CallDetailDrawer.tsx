@@ -1,3 +1,8 @@
+/**
+ * CallDetailDrawer - Slide-in drawer showing full details for a single VAPI call.
+ * Fetches call data by ID via tRPC and displays duration, outcome, transcript, and a
+ * link to the call recording. Closes via the onClose callback.
+ */
 'use client';
 
 import { type FC } from 'react';

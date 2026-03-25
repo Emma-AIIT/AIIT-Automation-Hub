@@ -1,3 +1,8 @@
+/**
+ * useSearchPalette - Hook that manages open/close state for the SearchPalette.
+ * Registers a global Cmd+K / Ctrl+K keyboard shortcut to toggle the palette open
+ * and exposes open, setOpen, and an openSearch convenience function.
+ */
 "use client";
 
 import { useEffect, useState } from "react";

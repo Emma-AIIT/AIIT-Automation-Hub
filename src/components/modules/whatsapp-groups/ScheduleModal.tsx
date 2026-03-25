@@ -1,3 +1,8 @@
+/**
+ * ScheduleModal - Modal for scheduling a future WhatsApp broadcast message.
+ * Accepts a pre-selected list of group IDs, lets the user compose a message and pick a
+ * Sydney-timezone send time, then submits the scheduled message via tRPC mutation.
+ */
 'use client';
 
 import { useState, useEffect } from 'react';

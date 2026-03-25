@@ -1,3 +1,15 @@
+/**
+ * Voice Agents page — shows all configured VAPI assistants as selectable agent cards and
+ * displays their call history in a log table. Supports "Today" / "Last 7 days" date presets.
+ * Clicking an agent card filters the call log to that assistant. Clicking a call row opens
+ * the CallDetailDrawer with transcript, recording, and cost breakdown.
+ */
+/**
+ * Voice Agents page at /automations/voice-agents.
+ * Lists all VAPI agents from AGENT_CONFIGS with live call-count and status derived
+ * from the selected date range (today or last 7 days). Clicking an agent filters the
+ * call log table below. Opens a CallDetailDrawer when a specific call is selected.
+ */
 'use client';
 
 import { useState, useMemo } from 'react';

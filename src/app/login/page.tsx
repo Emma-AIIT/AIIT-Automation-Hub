@@ -1,3 +1,13 @@
+/**
+ * Login page — email/password authentication via Supabase Auth.
+ * On success, redirects the user to /automations. Displays inline error messages
+ * for failed sign-in attempts. Styled entirely with scoped inline CSS (no Tailwind).
+ */
+/**
+ * Login page for the AIIT Operations Center.
+ * Authenticates users via Supabase email/password and redirects to /automations on success.
+ * All styles are scoped inline; no shared UI components are used on this page.
+ */
 'use client';
 
 import { useState } from 'react';

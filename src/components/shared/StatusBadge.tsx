@@ -1,3 +1,8 @@
+/**
+ * StatusBadge (shared) - Inline badge for quote pipeline statuses.
+ * Maps quote status strings (Pre sales, Quote, Won, Lost, etc.) to color-coded pill
+ * badges; also exports a QuoteSourceBadge for rendering the lead source of a quote.
+ */
 import type { Quote } from '@/lib/mock-data/quotes';
 
 /** Status colors: Pre sales (yellow), Quote (green), Lost (blue), Won (purple) */

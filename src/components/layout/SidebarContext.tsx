@@ -1,3 +1,9 @@
+/**
+ * SidebarContext
+ * React context and provider that manages sidebar collapsed/expanded state (persisted to
+ * localStorage) and mobile open/close state. Exposes toggle, toggleMobile, and closeMobile
+ * helpers via the useSidebar hook.
+ */
 'use client';
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';

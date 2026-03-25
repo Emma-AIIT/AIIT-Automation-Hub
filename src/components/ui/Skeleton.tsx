@@ -1,3 +1,8 @@
+/**
+ * Skeleton - Collection of shimmer-animated placeholder components used as loading states.
+ * Exports a base Skeleton block plus pre-composed variants (SkeletonTable, SkeletonQuoteStats,
+ * etc.) that mirror the shape of their corresponding real components.
+ */
 'use client';
 
 import { type FC, type HTMLAttributes } from 'react';

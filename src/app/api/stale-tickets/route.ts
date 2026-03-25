@@ -1,3 +1,10 @@
+/**
+ * GET /api/stale-tickets
+ * Cron endpoint — called by Vercel Cron (secured with CRON_SECRET bearer token).
+ * Queries all non-resolved tickets older than 3 days and POSTs each one to the
+ * MAKE_STALE_TICKET_WEBHOOK_URL so Make.com can send follow-up notifications.
+ * Auth check is skipped in development. Returns a summary of sent/error counts.
+ */
 import { type NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { env } from '@/env';

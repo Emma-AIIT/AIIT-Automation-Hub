@@ -1,3 +1,9 @@
+/**
+ * SidebarNavItem
+ * A single navigation item in the sidebar. Renders a named icon, label, optional badge count,
+ * and a "Soon" tag for coming-soon items. Highlights the active route with an orange accent bar
+ * and collapses to icon-only mode when the sidebar is collapsed.
+ */
 'use client';
 
 import Link from 'next/link';

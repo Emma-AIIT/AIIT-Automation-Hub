@@ -1,3 +1,16 @@
+/**
+ * AI Operations Center — main hub dashboard page.
+ * Displays top-level KPI cards (active agents, outstanding debt, at-risk clients, VAPI costs),
+ * a 30-day VAPI call metrics chart, a unified activity timeline built from the last 24 h of
+ * calls/tickets/quotes, per-agent status cards, and quick-nav module cards for each automation.
+ */
+/**
+ * Main "AI Operations Center" overview dashboard at /automations.
+ * Aggregates live data from four sources — VAPI call history, debt-recovery client
+ * stats, quote pipeline, and support tickets — to render top-level KPI cards, a
+ * 30-day VAPI metrics chart, a real-time activity timeline, agent status cards, and
+ * quick-link module cards for each automation area.
+ */
 'use client';
 
 import { useMemo } from 'react';

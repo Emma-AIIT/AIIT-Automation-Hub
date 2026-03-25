@@ -1,3 +1,9 @@
+/**
+ * SyncButton
+ * Triggers a manual Xero data sync via the tRPC sync.trigger mutation and displays progress
+ * via react-hot-toast notifications. Subscribes to Supabase Realtime on the sync_events table
+ * to detect sync completion and persists the last-sync timestamp in localStorage.
+ */
 'use client';
 
 import { useState, useEffect, useRef } from 'react';

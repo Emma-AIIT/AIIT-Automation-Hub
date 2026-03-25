@@ -1,3 +1,9 @@
+/**
+ * ActivityTimeline
+ * Displays a chronological list of recent activity items (calls, payments, quotes, tickets, syncs)
+ * from the last 24 hours. Each item is rendered with a type-specific icon and color.
+ * Shows skeleton placeholders while data is loading and a fallback message when empty.
+ */
 'use client';
 
 import { type FC } from 'react';

@@ -1,3 +1,10 @@
+/**
+ * POST /api/add-ticket-reply
+ * Called by Make.com when a customer replies to a ticket email thread.
+ * Validates that the referenced ticket exists, inserts an inbound reply row into
+ * ticket_replies, and bumps the parent ticket's updated_at timestamp so the UI
+ * reflects new activity. Returns 404 if the ticket is not found.
+ */
 import { type NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { z } from 'zod';

@@ -1,3 +1,11 @@
+/**
+ * Invoicing Logs page at /automations/invoicing-logs.
+ * Displays messages received in the "AIIT – Need To Invoice" WhatsApp group,
+ * including both text and image messages with sender avatars, timestamps, and image
+ * previews that open full-size in a new tab. Supports debounced search by sender and
+ * a type filter (all / text / image). Data polls every 30 seconds via the
+ * invoicing tRPC router.
+ */
 'use client';
 
 import { useState, useRef } from 'react';

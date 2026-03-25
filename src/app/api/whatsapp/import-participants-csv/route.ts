@@ -1,3 +1,12 @@
+/**
+ * POST /api/whatsapp/import-participants-csv
+ * Accepts a multipart CSV upload (field name "file") secured by the
+ * WHATSAPP_IMPORT_SECRET header (x-import-secret). Parses the five-column CSV
+ * exported from WhatsApp (Group Chat, Participant ID, Name, Number, Group Chat ID)
+ * and upserts participants into whatsapp_group_participants, but only for groups that
+ * exist in whatsapp_dashboard_groups (seeded via scripts/seed-whatsapp-dashboard-groups.sql).
+ * Rows for unrecognised groups are silently skipped. Processes inserts in batches of 100.
+ */
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";

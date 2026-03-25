@@ -1,3 +1,14 @@
+/**
+ * Automations section layout — renders the collapsible Sidebar, the main content area, and the
+ * global SearchPalette command palette. Provides SidebarContext and SearchContext to all child
+ * pages so they can toggle the sidebar and open the search palette.
+ */
+/**
+ * Shell layout for all /automations routes.
+ * Mounts the collapsible Sidebar, the SidebarMain content area, and the global
+ * SearchPalette command palette. Provides both SidebarContext and SearchContext
+ * to all child pages so they can control the palette and sidebar state.
+ */
 'use client';
 
 import { Sidebar } from '@/components/layout/Sidebar';

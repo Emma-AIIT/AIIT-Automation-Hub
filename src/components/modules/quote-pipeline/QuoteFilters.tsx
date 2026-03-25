@@ -1,3 +1,8 @@
+/**
+ * QuoteFilters - Filter bar for the quote pipeline table.
+ * Provides controlled inputs for text search, status, lead source, and time period,
+ * emitting change callbacks to the parent so the table can filter its rows.
+ */
 'use client';
 
 interface QuoteFiltersProps {

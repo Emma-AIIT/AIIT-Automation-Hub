@@ -1,3 +1,8 @@
+/**
+ * AvatarInitials - Circular avatar that renders a person's initials in a deterministic color.
+ * Derives initials from the provided name string and picks a background/text color from a
+ * fixed palette based on a hash of the name, ensuring consistent colors across renders.
+ */
 const COLORS = [
   'bg-blue-100 text-blue-700',
   'bg-emerald-100 text-emerald-700',

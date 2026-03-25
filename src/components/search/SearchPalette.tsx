@@ -1,3 +1,9 @@
+/**
+ * SearchPalette - Global command-palette overlay for cross-module search.
+ * Queries clients, tickets, and quotes via tRPC as the user types, then navigates to
+ * the relevant module page (opening the matching drawer) when a result is selected.
+ * Controlled by the open/onClose props supplied by useSearchPalette.
+ */
 "use client";
 
 import { useEffect, useRef, useState } from "react";

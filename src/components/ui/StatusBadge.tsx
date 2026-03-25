@@ -1,3 +1,8 @@
+/**
+ * StatusBadge (ui) - Pill badge for debt-recovery client statuses.
+ * Accepts a status of current | warning | critical | suspended and renders it with
+ * the appropriate color, label, and optional size variant (sm | md).
+ */
 import { type FC } from 'react';
 
 type Status = 'current' | 'warning' | 'critical' | 'suspended';

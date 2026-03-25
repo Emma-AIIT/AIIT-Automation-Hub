@@ -1,3 +1,9 @@
+/**
+ * ClientTable
+ * Paginated, sortable table of debt-recovery clients. Supports text search, status filtering,
+ * multi-column sorting, and an inline VAPI call trigger for eligible clients.
+ * Clicking a row opens the ClientDetailDrawer via the onClientClick callback.
+ */
 'use client';
 
 import { type FC, useState, useMemo, useRef, useEffect } from 'react';

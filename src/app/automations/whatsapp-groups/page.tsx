@@ -1,3 +1,19 @@
+/**
+ * WhatsApp Broadcast page — compose and send text messages or images to one or more
+ * WhatsApp groups across multiple accounts (aiit-automation, susu-closets, etc.).
+ * Groups are loaded from Supabase; a "Refresh groups" button triggers a Make.com sync.
+ * Messages with images are forwarded as multipart via /api/whatsapp/send so Make.com
+ * receives the binary file. Supports scheduled sends and logs every broadcast to Supabase.
+ */
+/**
+ * WhatsApp Broadcast page at /automations/whatsapp-groups.
+ * Allows composing a text/image message and sending it immediately or scheduling it
+ * for later delivery to selected WhatsApp groups, scoped to a chosen account
+ * (aiit-automation, susu-closets, etc.). Groups are loaded from Supabase and can be
+ * refreshed on demand via the WhatsApp sync mutation. Each broadcast is logged to
+ * Supabase for history. Image sends are routed through /api/whatsapp/send to forward
+ * multipart form data to the Make.com webhook.
+ */
 'use client';
 
 import { useState, useCallback, useRef } from 'react';

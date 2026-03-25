@@ -1,3 +1,9 @@
+/**
+ * AgentStatusCards
+ * Lists configured VAPI voice agents with their live status (active, idle, on-call)
+ * and the number of calls made in the last 24 hours. Each card links to the voice agents page.
+ * Renders skeleton placeholders while loading.
+ */
 'use client';
 
 import { type FC } from 'react';

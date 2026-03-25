@@ -1,3 +1,8 @@
+/**
+ * ThemeToggle - Icon button that switches between light and dark theme.
+ * Reads the current theme from ThemeContext and calls toggleTheme on click,
+ * rendering a sun icon in dark mode and a moon icon in light mode.
+ */
 'use client';
 
 import { type FC } from 'react';

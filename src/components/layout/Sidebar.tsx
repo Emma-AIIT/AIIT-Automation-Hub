@@ -1,3 +1,9 @@
+/**
+ * Sidebar
+ * The primary navigation sidebar for the AIIT Automation Hub. Renders the brand logo,
+ * a search trigger (⌘K), module navigation links, a collapse toggle (desktop), and a user
+ * profile section with sign-out. Supports collapsible and mobile-overlay modes via SidebarContext.
+ */
 'use client';
 
 import Link from 'next/link';

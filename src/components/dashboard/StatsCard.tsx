@@ -1,3 +1,9 @@
+/**
+ * StatsCard
+ * A single metric card displaying a title, value, optional subtitle, icon, and trend badge.
+ * The trend badge renders green for positive changes and red for negative ones.
+ * Includes a shimmer hover effect and a decorative corner gradient.
+ */
 'use client';
 
 import { type FC, type ReactNode } from 'react';
