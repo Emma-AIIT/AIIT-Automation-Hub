@@ -329,6 +329,12 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     icon: "phone",
   },
   {
+    id: "contacts",
+    label: "Contacts",
+    route: "/automations/contacts",
+    icon: "users",
+  },
+  {
     id: "tickets",
     label: "IT Support",
     route: "/automations/tickets",
