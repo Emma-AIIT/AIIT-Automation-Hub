@@ -8,12 +8,14 @@
  */
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { getWebhookUrl } from '~/lib/config/whatsapp-accounts';
+import { getWebhookUrl, WHATSAPP_ACCOUNTS } from '~/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '~/lib/config/whatsapp-accounts';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB - Make.com webhook limit
 
-const VALID_ACCOUNT_IDS: WhatsAppAccountId[] = ['aiit-automation', 'susu-closets', 'gim-foundation', 'aiit-business'];
+// Accept only the accounts that are actually active in WHATSAPP_ACCOUNTS,
+// so this list can never drift from the configured accounts.
+const VALID_ACCOUNT_IDS: WhatsAppAccountId[] = WHATSAPP_ACCOUNTS.map((a) => a.id);
 
 export async function POST(req: NextRequest) {
   try {
