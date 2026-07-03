@@ -19,6 +19,10 @@ export type CallContact = {
   name: string;
   phone: string;
   business: string | null;
+  // Number of times the outbound calling automation has called this contact.
+  // Written by Make.com (incremented alongside last_called_at); the dashboard
+  // only displays and sorts by it.
+  call_count: number;
   last_called_at: string | null;
   created_at: string;
 };

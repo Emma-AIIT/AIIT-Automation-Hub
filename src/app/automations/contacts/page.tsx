@@ -6,6 +6,11 @@
  * any row, manually adding contacts, and deleting rows. All writes go through the
  * callContacts tRPC router. Data and display follow the same light-theme patterns as the
  * other automation modules.
+ *
+ * Columns are user-toggleable: click a column header's × (or use the "Columns" menu) to
+ * hide it, and re-enable it from the menu. Visibility is remembered per-browser via
+ * localStorage. Hiding the "Times called" column does not affect sorting — the counter is
+ * tracked regardless. The list defaults to sorting by most-called first.
  */
 'use client';
 
@@ -17,14 +22,56 @@ import { format } from 'date-fns';
 
 const PAGE_SIZE = 25;
 
-type SortKey = 'newest' | 'oldest' | 'name' | 'recently-called';
+type SortKey =
+  | 'most-called'
+  | 'least-called'
+  | 'newest'
+  | 'oldest'
+  | 'name'
+  | 'recently-called';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'most-called', label: 'Most called' },
+  { value: 'least-called', label: 'Least called' },
+  { value: 'recently-called', label: 'Recently called' },
   { value: 'newest', label: 'Newest added' },
   { value: 'oldest', label: 'Oldest added' },
   { value: 'name', label: 'Name (A–Z)' },
-  { value: 'recently-called', label: 'Recently called' },
 ];
+
+// ─── Column model ────────────────────────────────────────────────────────────
+// Every column except Name can be hidden. Name always stays so rows remain
+// identifiable. The Actions column is fixed and lives outside this list.
+type ColumnKey = 'name' | 'phone' | 'business' | 'call_count' | 'last_called' | 'added';
+
+type Column = {
+  key: ColumnKey;
+  label: string;
+  hideable: boolean;
+  align: 'left' | 'right';
+};
+
+const COLUMNS: Column[] = [
+  { key: 'name', label: 'Name', hideable: false, align: 'left' },
+  { key: 'phone', label: 'Phone', hideable: true, align: 'left' },
+  { key: 'business', label: 'Business', hideable: true, align: 'left' },
+  { key: 'call_count', label: 'Times called', hideable: true, align: 'right' },
+  { key: 'last_called', label: 'Last called', hideable: true, align: 'left' },
+  { key: 'added', label: 'Added', hideable: true, align: 'left' },
+];
+
+type Visibility = Record<ColumnKey, boolean>;
+
+const DEFAULT_VISIBILITY: Visibility = {
+  name: true,
+  phone: true,
+  business: true,
+  call_count: true,
+  last_called: true,
+  added: true,
+};
+
+const VISIBILITY_STORAGE_KEY = 'contacts-column-visibility';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -36,10 +83,40 @@ function formatDate(iso: string | null): string {
 export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('newest');
+  const [sortKey, setSortKey] = useState<SortKey>('most-called');
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
+  const [visibility, setVisibility] = useState<Visibility>(DEFAULT_VISIBILITY);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load saved column visibility once on mount (client-only to avoid SSR mismatch).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(VISIBILITY_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<Visibility>;
+        setVisibility({ ...DEFAULT_VISIBILITY, ...parsed, name: true });
+      }
+    } catch {
+      /* ignore malformed storage */
+    }
+  }, []);
+
+  const setColumnVisible = (key: ColumnKey, visible: boolean) => {
+    if (key === 'name') return; // Name can't be hidden.
+    setVisibility((prev) => {
+      const next = { ...prev, [key]: visible };
+      try {
+        window.localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore quota / unavailable storage */
+      }
+      return next;
+    });
+  };
+
+  const visibleColumns = COLUMNS.filter((c) => visibility[c.key]);
+  const colSpan = visibleColumns.length + 1; // +1 for the Actions column
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
@@ -84,17 +161,21 @@ export default function ContactsPage() {
   // Sort client-side (search is handled server-side via the query input).
   const sorted = useMemo(() => {
     const copy = [...contacts];
+    const callCount = (c: CallContact) => c.call_count ?? 0;
+    const lastCalled = (c: CallContact) => new Date(c.last_called_at ?? 0).getTime();
     copy.sort((a, b) => {
       switch (sortKey) {
+        case 'most-called':
+          // Most calls first; break ties by most-recently called.
+          return callCount(b) - callCount(a) || lastCalled(b) - lastCalled(a);
+        case 'least-called':
+          return callCount(a) - callCount(b) || lastCalled(a) - lastCalled(b);
         case 'name':
           return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
         case 'oldest':
           return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
         case 'recently-called':
-          return (
-            new Date(b.last_called_at ?? 0).getTime() -
-            new Date(a.last_called_at ?? 0).getTime()
-          );
+          return lastCalled(b) - lastCalled(a);
         case 'newest':
         default:
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -186,6 +267,7 @@ export default function ContactsPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <ColumnsMenu visibility={visibility} onToggle={setColumnVisible} />
           <select
             value={sortKey}
             onChange={(e) => { setSortKey(e.target.value as SortKey); setPage(1); }}
@@ -211,14 +293,12 @@ export default function ContactsPage() {
       {/* Table */}
       <div className="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-card)] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-secondary)]">
-                <th className="text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)]">Name</th>
-                <th className="text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)]">Phone</th>
-                <th className="text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)]">Business</th>
-                <th className="text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)] hidden lg:table-cell">Last called</th>
-                <th className="text-left py-3 px-4 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)] hidden md:table-cell">Added</th>
+                {visibleColumns.map((col) => (
+                  <HeaderCell key={col.key} column={col} onHide={() => setColumnVisible(col.key, false)} />
+                ))}
                 <th className="text-right py-3 px-4 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)] w-16">Actions</th>
               </tr>
             </thead>
@@ -226,6 +306,7 @@ export default function ContactsPage() {
               {/* Inline add row */}
               {adding && (
                 <AddRow
+                  columns={visibleColumns}
                   onCancel={() => setAdding(false)}
                   onSave={(values) => createMutation.mutate(values)}
                   isSaving={createMutation.isPending}
@@ -235,20 +316,20 @@ export default function ContactsPage() {
               {isLoading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={6} className="px-4 py-3">
+                    <td colSpan={colSpan} className="px-4 py-3">
                       <div className="h-6 rounded bg-[var(--color-bg-secondary)] animate-pulse" />
                     </td>
                   </tr>
                 ))
               ) : isError ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-sm text-red-600">
+                  <td colSpan={colSpan} className="py-12 text-center text-sm text-red-600">
                     Failed to load contacts. Try refreshing.
                   </td>
                 </tr>
               ) : paginated.length === 0 && !adding ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center">
+                  <td colSpan={colSpan} className="py-16 text-center">
                     <p className="text-sm font-medium text-[var(--color-text-secondary)]">
                       {debouncedSearch ? 'No contacts match your search' : 'No contacts yet'}
                     </p>
@@ -264,6 +345,7 @@ export default function ContactsPage() {
                   <ContactRow
                     key={contact.id}
                     contact={contact}
+                    columns={visibleColumns}
                     onSaveField={handleSaveField}
                     onDelete={() => deleteMutation.mutate({ id: contact.id })}
                     isDeleting={deleteMutation.isPending && deleteMutation.variables?.id === contact.id}
@@ -313,9 +395,130 @@ export default function ContactsPage() {
       </div>
 
       <p className="text-xs text-[var(--color-text-faint)] leading-relaxed">
-        Tip: click any name, phone or business cell to edit it inline. Press Enter to save or Esc to cancel.
+        Tip: click any name, phone or business cell to edit it inline. Click a column&apos;s ×
+        (or use the Columns menu) to hide it — sorting still works even when a column is hidden.
       </p>
     </div>
+  );
+}
+
+// ─── Columns menu ────────────────────────────────────────────────────────────
+// Popover with a checkbox per hideable column, so hidden columns can be brought back.
+
+function ColumnsMenu({
+  visibility,
+  onToggle,
+}: {
+  visibility: Visibility;
+  onToggle: (key: ColumnKey, visible: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickAway = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onClickAway);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClickAway);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const hiddenCount = COLUMNS.filter((c) => c.hideable && !visibility[c.key]).length;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-card)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <line x1="9" y1="3" x2="9" y2="21" />
+          <line x1="15" y1="3" x2="15" y2="21" />
+        </svg>
+        <span className="hidden sm:inline">Columns</span>
+        {hiddenCount > 0 && (
+          <span className="text-[10px] font-semibold rounded-full bg-[var(--color-accent-light)] text-[var(--color-accent-primary)] px-1.5 py-0.5">
+            {hiddenCount} hidden
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-card)] shadow-lg p-1.5">
+          <p className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)]">
+            Show columns
+          </p>
+          {COLUMNS.map((col) => {
+            const checked = visibility[col.key];
+            return (
+              <label
+                key={col.key}
+                className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm ${
+                  col.hideable
+                    ? 'cursor-pointer text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
+                    : 'cursor-not-allowed text-[var(--color-text-faint)]'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!col.hideable}
+                  onChange={(e) => onToggle(col.key, e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-[var(--color-border-strong)] text-[var(--color-accent-primary)] focus:ring-[var(--color-accent-primary)]/30"
+                />
+                <span>{col.label}</span>
+                {!col.hideable && <span className="ml-auto text-[10px]">always on</span>}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Header cell ─────────────────────────────────────────────────────────────
+// Hideable columns get a × that appears on hover to hide the column directly.
+
+function HeaderCell({ column, onHide }: { column: Column; onHide: () => void }) {
+  return (
+    <th
+      className={`py-3 px-4 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-text-faint)] ${
+        column.align === 'right' ? 'text-right' : 'text-left'
+      }`}
+    >
+      <span
+        className={`group/th inline-flex items-center gap-1.5 ${
+          column.align === 'right' ? 'flex-row-reverse' : ''
+        }`}
+      >
+        {column.label}
+        {column.hideable && (
+          <button
+            type="button"
+            onClick={onHide}
+            title={`Hide ${column.label}`}
+            aria-label={`Hide ${column.label} column`}
+            className="opacity-0 group-hover/th:opacity-100 focus:opacity-100 rounded p-0.5 text-[var(--color-text-faint)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-opacity"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+      </span>
+    </th>
   );
 }
 
@@ -323,50 +526,79 @@ export default function ContactsPage() {
 
 function ContactRow({
   contact,
+  columns,
   onSaveField,
   onDelete,
   isDeleting,
 }: {
   contact: CallContact;
+  columns: Column[];
   onSaveField: (contact: CallContact, field: 'name' | 'phone' | 'business', value: string) => void;
   onDelete: () => void;
   isDeleting?: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  const renderCell = (col: Column) => {
+    switch (col.key) {
+      case 'name':
+        return (
+          <td key={col.key} className="px-4 py-2">
+            <EditableCell
+              value={contact.name}
+              placeholder="Add name…"
+              onSave={(v) => onSaveField(contact, 'name', v)}
+              className="font-medium text-[var(--color-text-primary)]"
+            />
+          </td>
+        );
+      case 'phone':
+        return (
+          <td key={col.key} className="px-4 py-2">
+            <EditableCell
+              value={contact.phone}
+              placeholder="Add phone…"
+              onSave={(v) => onSaveField(contact, 'phone', v)}
+              mono
+              className="text-[var(--color-text-secondary)]"
+            />
+          </td>
+        );
+      case 'business':
+        return (
+          <td key={col.key} className="px-4 py-2">
+            <EditableCell
+              value={contact.business ?? ''}
+              placeholder="Add business…"
+              onSave={(v) => onSaveField(contact, 'business', v)}
+              className="text-[var(--color-text-secondary)]"
+            />
+          </td>
+        );
+      case 'call_count':
+        return (
+          <td key={col.key} className="px-4 py-2 text-right">
+            <CallCountBadge count={contact.call_count ?? 0} />
+          </td>
+        );
+      case 'last_called':
+        return (
+          <td key={col.key} className="px-4 py-2 text-xs text-[var(--color-text-muted)] whitespace-nowrap">
+            {formatDate(contact.last_called_at)}
+          </td>
+        );
+      case 'added':
+        return (
+          <td key={col.key} className="px-4 py-2 text-xs text-[var(--color-text-muted)] whitespace-nowrap">
+            {formatDate(contact.created_at)}
+          </td>
+        );
+    }
+  };
+
   return (
     <tr className={`hover:bg-[var(--color-bg-hover)] transition-colors ${isDeleting ? 'opacity-50' : ''}`}>
-      <td className="px-4 py-2">
-        <EditableCell
-          value={contact.name}
-          placeholder="Add name…"
-          onSave={(v) => onSaveField(contact, 'name', v)}
-          className="font-medium text-[var(--color-text-primary)]"
-        />
-      </td>
-      <td className="px-4 py-2">
-        <EditableCell
-          value={contact.phone}
-          placeholder="Add phone…"
-          onSave={(v) => onSaveField(contact, 'phone', v)}
-          mono
-          className="text-[var(--color-text-secondary)]"
-        />
-      </td>
-      <td className="px-4 py-2">
-        <EditableCell
-          value={contact.business ?? ''}
-          placeholder="Add business…"
-          onSave={(v) => onSaveField(contact, 'business', v)}
-          className="text-[var(--color-text-secondary)]"
-        />
-      </td>
-      <td className="px-4 py-2 text-xs text-[var(--color-text-muted)] hidden lg:table-cell whitespace-nowrap">
-        {formatDate(contact.last_called_at)}
-      </td>
-      <td className="px-4 py-2 text-xs text-[var(--color-text-muted)] hidden md:table-cell whitespace-nowrap">
-        {formatDate(contact.created_at)}
-      </td>
+      {columns.map(renderCell)}
       <td className="px-4 py-2 text-right">
         {confirmDelete ? (
           <div className="inline-flex items-center gap-1">
@@ -403,6 +635,22 @@ function ContactRow({
         )}
       </td>
     </tr>
+  );
+}
+
+// ─── Call count badge ────────────────────────────────────────────────────────
+
+function CallCountBadge({ count }: { count: number }) {
+  if (count <= 0) {
+    return <span className="text-xs text-[var(--color-text-faint)] tabular-nums">0</span>;
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-accent-light)] px-2 py-0.5 text-xs font-semibold tabular-nums text-[var(--color-accent-primary)]">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
+      </svg>
+      {count}
+    </span>
   );
 }
 
@@ -476,10 +724,12 @@ function EditableCell({
 // ─── Add Row ─────────────────────────────────────────────────────────────────
 
 function AddRow({
+  columns,
   onCancel,
   onSave,
   isSaving,
 }: {
+  columns: Column[];
   onCancel: () => void;
   onSave: (values: { name: string; phone: string; business?: string }) => void;
   isSaving?: boolean;
@@ -499,38 +749,54 @@ function AddRow({
   const inputClass =
     'w-full min-w-[120px] px-2 py-1.5 rounded-md border border-[var(--color-border-default)] bg-[var(--color-input-bg)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/20 focus:border-[var(--color-border-strong)]';
 
+  const renderCell = (col: Column) => {
+    switch (col.key) {
+      case 'name':
+        return (
+          <td key={col.key} className="px-4 py-2">
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
+              placeholder="Name *"
+              className={inputClass}
+            />
+          </td>
+        );
+      case 'phone':
+        return (
+          <td key={col.key} className="px-4 py-2">
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
+              placeholder="Phone *"
+              className={`${inputClass} font-mono text-xs`}
+            />
+          </td>
+        );
+      case 'business':
+        return (
+          <td key={col.key} className="px-4 py-2">
+            <input
+              value={business}
+              onChange={(e) => setBusiness(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
+              placeholder="Business (optional)"
+              className={inputClass}
+            />
+          </td>
+        );
+      // Non-editable columns: empty placeholder cells so the row stays aligned.
+      default:
+        return <td key={col.key} className="px-4 py-2" />;
+    }
+  };
+
   return (
     <tr className="bg-[var(--color-accent-light)]/40">
-      <td className="px-4 py-2">
-        <input
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
-          placeholder="Name *"
-          className={inputClass}
-        />
-      </td>
-      <td className="px-4 py-2">
-        <input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
-          placeholder="Phone *"
-          className={`${inputClass} font-mono text-xs`}
-        />
-      </td>
-      <td className="px-4 py-2">
-        <input
-          value={business}
-          onChange={(e) => setBusiness(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
-          placeholder="Business (optional)"
-          className={inputClass}
-        />
-      </td>
-      <td className="px-4 py-2 hidden lg:table-cell" />
-      <td className="px-4 py-2 hidden md:table-cell" />
+      {columns.map(renderCell)}
       <td className="px-4 py-2 text-right whitespace-nowrap">
         <div className="inline-flex items-center gap-1">
           <button
