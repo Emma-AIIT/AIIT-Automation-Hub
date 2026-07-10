@@ -16,18 +16,28 @@ import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 const PARTICIPANTS_PAGE_SIZE = 25;
+const MAX_CHARS = 1000;
+
+type SendStatus = 'pending' | 'success' | 'error';
 
 export default function WhatsAppParticipantsPage() {
   const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [participantPage, setParticipantPage] = useState(1);
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<Set<string>>(new Set());
+  const [message, setMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [sendResults, setSendResults] = useState<Map<string, SendStatus>>(new Map());
 
   const handleAccountSwitch = useCallback((id: WhatsAppAccountId) => {
     setActiveAccount(id);
     setSelectedGroupId(null);
     setSearch('');
     setParticipantPage(1);
+    setSelectedParticipantIds(new Set());
+    setMessage('');
+    setSendResults(new Map());
   }, []);
 
   const utils = api.useUtils();
@@ -58,9 +68,12 @@ export default function WhatsAppParticipantsPage() {
     }
   }, [selectedGroupId, participants.length, utils.whatsapp.getDashboardGroups]);
 
-  // Reset to page 1 when switching groups or accounts
+  // Reset to page 1, clear selection and composer when switching groups or accounts
   useEffect(() => {
     setParticipantPage(1);
+    setSelectedParticipantIds(new Set());
+    setMessage('');
+    setSendResults(new Map());
   }, [selectedGroupId, activeAccount]);
 
   const totalParticipantPages = Math.max(1, Math.ceil(participants.length / PARTICIPANTS_PAGE_SIZE));
@@ -117,6 +130,86 @@ export default function WhatsAppParticipantsPage() {
 
   const participantsWithNumbers = participants.filter((p) => p.participant_phone?.trim() && p.participant_id.endsWith('@c.us'));
   const unextractableCount = participants.filter((p) => isUnextractable(p)).length;
+
+  // Contacts that can be messaged 1:1 (real @c.us chatId). LID/private contacts are excluded.
+  const messageableParticipants = participants.filter(
+    (p) => p.participant_id.endsWith('@c.us') && !!p.participant_phone?.trim()
+  );
+
+  const toggleParticipant = useCallback((participantId: string) => {
+    setSelectedParticipantIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(participantId)) next.delete(participantId);
+      else next.add(participantId);
+      return next;
+    });
+  }, []);
+
+  const allMessageableSelected =
+    messageableParticipants.length > 0 &&
+    messageableParticipants.every((p) => selectedParticipantIds.has(p.participant_id));
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedParticipantIds((prev) => {
+      const allSelected =
+        messageableParticipants.length > 0 &&
+        messageableParticipants.every((p) => prev.has(p.participant_id));
+      if (allSelected) return new Set();
+      return new Set(messageableParticipants.map((p) => p.participant_id));
+    });
+  }, [messageableParticipants]);
+
+  const selectedRecipients = messageableParticipants
+    .filter((p) => selectedParticipantIds.has(p.participant_id))
+    .map((p) => ({ chatId: p.participant_id, phone: p.participant_phone, name: p.participant_name }));
+
+  const sendMutation = api.whatsapp.sendMessage.useMutation();
+
+  // Sends the composed message to each selected participant individually (1:1) via the
+  // existing sendMessage webhook, using their participant_id as the chatId.
+  const handleSendMessages = useCallback(async () => {
+    const trimmed = message.trim();
+    if (!trimmed || selectedRecipients.length === 0 || isSending) return;
+
+    setIsSending(true);
+    const next = new Map<string, SendStatus>();
+    selectedRecipients.forEach((r) => next.set(r.chatId, 'pending'));
+    setSendResults(new Map(next));
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const recipient of selectedRecipients) {
+      try {
+        await sendMutation.mutateAsync({ accountId: activeAccount, chatId: recipient.chatId, message: trimmed });
+        next.set(recipient.chatId, 'success');
+        successCount++;
+      } catch {
+        next.set(recipient.chatId, 'error');
+        errorCount++;
+      }
+      setSendResults(new Map(next));
+    }
+
+    setIsSending(false);
+
+    if (errorCount === 0) {
+      toast.success(`Message sent to ${successCount} contact${successCount !== 1 ? 's' : ''}`);
+      setMessage('');
+      setSelectedParticipantIds(new Set());
+    } else if (successCount === 0) {
+      toast.error(`Failed to send to all ${errorCount} contact${errorCount !== 1 ? 's' : ''}`);
+    } else {
+      toast(`Sent to ${successCount}, failed for ${errorCount}`, { icon: '⚠️' });
+    }
+  }, [message, selectedRecipients, isSending, sendMutation, activeAccount]);
+
+  const charCount = message.length;
+  const charCountColor =
+    charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-(--color-text-faint)';
+  const canSend = message.trim().length > 0 && selectedRecipients.length > 0 && !isSending;
+  const sendSuccessCount = Array.from(sendResults.values()).filter((s) => s === 'success').length;
+  const sendErrorCount = Array.from(sendResults.values()).filter((s) => s === 'error').length;
 
   const handleCopyAllNumbers = useCallback(() => {
     if (participantsWithNumbers.length === 0) {
@@ -403,10 +496,43 @@ export default function WhatsAppParticipantsPage() {
                     </div>
                   </div>
                 )}
+                {selectedParticipantIds.size > 0 && (
+                  <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-(--color-border-subtle) bg-[#25D366]/5">
+                    <span className="text-sm font-medium text-(--color-text-primary)">
+                      {selectedParticipantIds.size} selected
+                    </span>
+                    <span className="text-xs text-(--color-text-muted)">— compose your message below</span>
+                    <div className="flex-1" />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedParticipantIds(new Set())}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg border border-(--color-border-default) bg-white text-(--color-text-secondary) hover:bg-(--color-bg-hover) transition"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-(--color-border-subtle) bg-(--color-bg-secondary)">
+                        <th className="w-10 py-3 px-4 text-left">
+                          <input
+                            type="checkbox"
+                            checked={allMessageableSelected}
+                            ref={(el) => {
+                              if (el) {
+                                el.indeterminate =
+                                  selectedParticipantIds.size > 0 && !allMessageableSelected;
+                              }
+                            }}
+                            onChange={toggleSelectAll}
+                            disabled={messageableParticipants.length === 0}
+                            className="h-4 w-4 rounded border-(--color-border-default) text-[#25D366] focus:ring-[#25D366] disabled:opacity-40 disabled:cursor-not-allowed align-middle"
+                            aria-label="Select all messageable contacts"
+                            title={messageableParticipants.length === 0 ? 'No messageable contacts' : 'Select all contacts with a phone number'}
+                          />
+                        </th>
                         <th className="text-left py-3 px-4 text-xs font-semibold uppercase tracking-wider text-(--color-text-muted)">
                           Phone
                         </th>
@@ -421,11 +547,24 @@ export default function WhatsAppParticipantsPage() {
                     <tbody>
                       {paginatedParticipants.map((p) => {
                         const unextractable = isUnextractable(p);
+                        const messageable = p.participant_id.endsWith('@c.us') && !!p.participant_phone?.trim();
+                        const isChecked = selectedParticipantIds.has(p.participant_id);
                         return (
                           <tr
                             key={p.participant_id}
-                            className="border-b border-(--color-border-subtle) hover:bg-(--color-bg-hover)"
+                            className={`border-b border-(--color-border-subtle) hover:bg-(--color-bg-hover) ${isChecked ? 'bg-[#25D366]/5' : ''}`}
                           >
+                            <td className="w-10 py-2.5 px-4">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleParticipant(p.participant_id)}
+                                disabled={!messageable}
+                                className="h-4 w-4 rounded border-(--color-border-default) text-[#25D366] focus:ring-[#25D366] disabled:opacity-40 disabled:cursor-not-allowed align-middle"
+                                aria-label={`Select ${p.participant_name?.trim() || p.participant_phone}`}
+                                title={messageable ? undefined : 'No phone number — cannot message (LID/private)'}
+                              />
+                            </td>
                             <td className="py-2.5 px-4 font-mono text-xs tabular-nums">
                               {unextractable ? (
                                 <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400 font-medium">
@@ -481,6 +620,87 @@ export default function WhatsAppParticipantsPage() {
           </div>
         </div>
       </div>
+
+      {/* Compose: send a message individually to each selected participant */}
+      {selectedGroupId && (
+        <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-(--color-border-subtle)">
+            <h2 className="text-sm font-semibold text-(--color-text-primary)">Compose Message</h2>
+            <p className="text-xs text-(--color-text-muted) mt-0.5">
+              Sent individually to each selected participant — tick contacts in the table above
+            </p>
+          </div>
+
+          <div className="p-5 space-y-3">
+            {/* Textarea */}
+            <div className="relative">
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value.slice(0, MAX_CHARS))}
+                placeholder="Type your message here..."
+                rows={6}
+                disabled={isSending}
+                className="w-full resize-none rounded-lg border border-(--color-border-default) bg-white px-4 py-3 text-sm text-(--color-text-primary) placeholder:text-(--color-text-faint) focus:outline-none focus:border-(--color-accent-primary) focus:ring-2 focus:ring-(--color-accent-primary)/10 transition leading-relaxed disabled:opacity-60"
+              />
+              <div className={`absolute bottom-3 right-3 text-xs tabular-nums ${charCountColor}`}>
+                {charCount}/{MAX_CHARS}
+              </div>
+            </div>
+
+            {/* Send button */}
+            <button
+              onClick={() => void handleSendMessages()}
+              disabled={!canSend}
+              className={`
+                w-full flex items-center justify-center gap-2.5 py-3 rounded-lg text-sm font-semibold transition-all
+                ${canSend
+                  ? 'bg-[#25D366] hover:bg-[#20b858] text-white shadow-sm hover:shadow-md active:scale-[0.98]'
+                  : 'bg-(--color-bg-hover) text-(--color-text-faint) cursor-not-allowed border border-(--color-border-subtle)'
+                }
+              `}
+            >
+              {isSending ? (
+                <>
+                  <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                  {selectedRecipients.length > 0
+                    ? `Send to ${selectedRecipients.length} contact${selectedRecipients.length !== 1 ? 's' : ''}`
+                    : 'Select contacts to send'}
+                </>
+              )}
+            </button>
+
+            {/* Send summary */}
+            {sendResults.size > 0 && !isSending && (sendSuccessCount > 0 || sendErrorCount > 0) && (
+              <div className="rounded-lg border border-(--color-border-subtle) bg-(--color-bg-secondary) px-4 py-3">
+                <p className="text-xs font-medium text-(--color-text-secondary) mb-2">Last send results</p>
+                <div className="flex items-center gap-4">
+                  {sendSuccessCount > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-[#25D366]" />
+                      <span className="text-xs text-(--color-text-secondary)">{sendSuccessCount} sent</span>
+                    </div>
+                  )}
+                  {sendErrorCount > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-red-400" />
+                      <span className="text-xs text-(--color-text-secondary)">{sendErrorCount} failed</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
