@@ -208,8 +208,9 @@ export default function WhatsAppParticipantsPage() {
   const logMutation = api.whatsapp.logParticipantMessage.useMutation();
 
   // Sends the composed message (and optional image) to each selected participant
-  // individually (1:1). Text-only sends go via the sendMessage webhook; image sends are
-  // routed through /api/whatsapp/send as multipart so Make.com receives the binary file.
+  // individually (1:1), firing all recipients in parallel (Make paces them on its side).
+  // Text-only sends go via the sendParticipantMessage webhook; image sends are routed
+  // through /api/whatsapp/send (target=participant) so Make.com receives the binary file.
   // Each batch is logged to Supabase (logParticipantMessage) so history updates immediately.
   const handleSendMessages = useCallback(async () => {
     const trimmed = message.trim();
@@ -221,41 +222,47 @@ export default function WhatsAppParticipantsPage() {
     selectedRecipients.forEach((r) => next.set(r.chatId, 'pending'));
     setSendResults(new Map(next));
 
-    let successCount = 0;
-    let errorCount = 0;
     const makeErrors: string[] = [];
 
-    for (const recipient of selectedRecipients) {
-      try {
-        if (hasImage) {
-          // Send via multipart API route so Make.com receives the file as binary
-          const formData = new FormData();
-          formData.append('chatId', recipient.chatId);
-          formData.append('accountId', activeAccount);
-          formData.append('target', 'participant');
-          if (trimmed) formData.append('message', trimmed);
-          formData.append('file', image, image.name);
+    // Fire all sends in parallel (no client-side pacing) — Make handles any delay/throttle
+    // between recipients on its side. Each request just hands off to Make and resolves fast.
+    const results = await Promise.all(
+      selectedRecipients.map(async (recipient) => {
+        try {
+          if (hasImage) {
+            // Send via multipart API route so Make.com receives the file as binary
+            const formData = new FormData();
+            formData.append('chatId', recipient.chatId);
+            formData.append('accountId', activeAccount);
+            formData.append('target', 'participant');
+            if (trimmed) formData.append('message', trimmed);
+            formData.append('file', image, image.name);
 
-          const res = await fetch('/api/whatsapp/send', { method: 'POST', body: formData });
-          if (!res.ok) {
-            const json = await res.json().catch(() => ({})) as { makeError?: string };
-            if (json.makeError && !makeErrors.includes(json.makeError)) makeErrors.push(json.makeError);
-            throw new Error(json.makeError ?? 'Failed to send');
+            const res = await fetch('/api/whatsapp/send', { method: 'POST', body: formData });
+            if (!res.ok) {
+              const json = await res.json().catch(() => ({})) as { makeError?: string };
+              if (json.makeError && !makeErrors.includes(json.makeError)) makeErrors.push(json.makeError);
+              throw new Error(json.makeError ?? 'Failed to send');
+            }
+          } else {
+            await sendMutation.mutateAsync({ accountId: activeAccount, chatId: recipient.chatId, message: trimmed });
           }
-        } else {
-          await sendMutation.mutateAsync({ accountId: activeAccount, chatId: recipient.chatId, message: trimmed });
+          next.set(recipient.chatId, 'success');
+          setSendResults(new Map(next));
+          return true;
+        } catch (err) {
+          if (err instanceof Error && err.message && !makeErrors.includes(err.message)) {
+            makeErrors.push(err.message);
+          }
+          next.set(recipient.chatId, 'error');
+          setSendResults(new Map(next));
+          return false;
         }
-        next.set(recipient.chatId, 'success');
-        successCount++;
-      } catch (err) {
-        if (err instanceof Error && err.message && !makeErrors.includes(err.message)) {
-          makeErrors.push(err.message);
-        }
-        next.set(recipient.chatId, 'error');
-        errorCount++;
-      }
-      setSendResults(new Map(next));
-    }
+      })
+    );
+
+    const successCount = results.filter(Boolean).length;
+    const errorCount = results.length - successCount;
 
     setIsSending(false);
 
