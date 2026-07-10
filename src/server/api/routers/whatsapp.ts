@@ -60,6 +60,22 @@ export interface BroadcastLogEntry {
   created_at: string;
 }
 
+export interface ParticipantMessageLogEntry {
+  id: string;
+  message: string | null;
+  recipient_ids: string[];
+  recipient_phones: string[];
+  recipient_names: string[];
+  has_file: boolean;
+  file_name: string | null;
+  status: "sent" | "failed" | "partial";
+  make_error: string | null;
+  sent_count: number;
+  failed_count: number;
+  sent_at: string;
+  created_at: string;
+}
+
 export interface DashboardGroup {
   group_id: string;
   group_name: string;
@@ -198,6 +214,35 @@ export const whatsappRouter = createTRPCRouter({
         .limit(50);
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       return (data ?? []) as BroadcastLogEntry[];
+    }),
+
+  // Returns the full individual participant message history, newest first — scoped to account.
+  // Paginated in batches of 1000 so all history is kept (the UI paginates client-side).
+  // Rows are written by Make.com after each 1:1 send from the Participants page.
+  listParticipantMessageHistory: publicProcedure
+    .input(z.object({ accountId: accountIdSchema }))
+    .query(async ({ input }): Promise<ParticipantMessageLogEntry[]> => {
+      const supabase = createAdminClient();
+      const PAGE_SIZE = 1000;
+      let offset = 0;
+      let hasMore = true;
+      const all: ParticipantMessageLogEntry[] = [];
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("whatsapp_participant_message_log")
+          .select("*")
+          .eq("account_id", input.accountId)
+          .order("sent_at", { ascending: false })
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+        const batch = (data ?? []) as ParticipantMessageLogEntry[];
+        all.push(...batch);
+        hasMore = batch.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+      }
+
+      return all;
     }),
 
   scheduleMessage: publicProcedure

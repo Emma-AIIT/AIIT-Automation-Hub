@@ -14,6 +14,7 @@ import toast from 'react-hot-toast';
 import type { DashboardGroup } from '@/server/api/routers/whatsapp';
 import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
+import { ParticipantMessageHistory } from '@/components/modules/whatsapp-participants/ParticipantMessageHistory';
 
 const PARTICIPANTS_PAGE_SIZE = 25;
 const MAX_CHARS = 1000;
@@ -29,6 +30,7 @@ export default function WhatsAppParticipantsPage() {
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendResults, setSendResults] = useState<Map<string, SendStatus>>(new Map());
+  const [historyBump, setHistoryBump] = useState(0);
 
   const handleAccountSwitch = useCallback((id: WhatsAppAccountId) => {
     setActiveAccount(id);
@@ -192,6 +194,8 @@ export default function WhatsAppParticipantsPage() {
     }
 
     setIsSending(false);
+    // Signal the history panel to refetch (Make.com logs the send on its side)
+    setHistoryBump((n) => n + 1);
 
     if (errorCount === 0) {
       toast.success(`Message sent to ${successCount} contact${successCount !== 1 ? 's' : ''}`);
@@ -701,6 +705,9 @@ export default function WhatsAppParticipantsPage() {
           </div>
         </div>
       )}
+
+      {/* Message history (individual sends — populated by Make.com) */}
+      <ParticipantMessageHistory accountId={activeAccount} refreshBump={historyBump} />
     </div>
   );
 }
