@@ -8,7 +8,8 @@
  */
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { DashboardGroup } from '@/server/api/routers/whatsapp';
@@ -18,8 +19,15 @@ import { ParticipantMessageHistory } from '@/components/modules/whatsapp-partici
 
 const PARTICIPANTS_PAGE_SIZE = 25;
 const MAX_CHARS = 1000;
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB - Make.com webhook limit
 
 type SendStatus = 'pending' | 'success' | 'error';
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function WhatsAppParticipantsPage() {
   const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
@@ -28,9 +36,34 @@ export default function WhatsAppParticipantsPage() {
   const [participantPage, setParticipantPage] = useState(1);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
+  const [image, setImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [sendResults, setSendResults] = useState<Map<string, SendStatus>>(new Map());
   const [historyBump, setHistoryBump] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleClearImage = useCallback(() => {
+    setImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) return;
+
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('Image must be under 10MB');
+      e.target.value = '';
+      return;
+    }
+
+    setImage(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }, []);
 
   const handleAccountSwitch = useCallback((id: WhatsAppAccountId) => {
     setActiveAccount(id);
@@ -39,7 +72,10 @@ export default function WhatsAppParticipantsPage() {
     setParticipantPage(1);
     setSelectedParticipantIds(new Set());
     setMessage('');
+    setImage(null);
+    setImagePreview(null);
     setSendResults(new Map());
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
   const utils = api.useUtils();
@@ -75,7 +111,10 @@ export default function WhatsAppParticipantsPage() {
     setParticipantPage(1);
     setSelectedParticipantIds(new Set());
     setMessage('');
+    setImage(null);
+    setImagePreview(null);
     setSendResults(new Map());
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, [selectedGroupId, activeAccount]);
 
   const totalParticipantPages = Math.max(1, Math.ceil(participants.length / PARTICIPANTS_PAGE_SIZE));
@@ -166,12 +205,16 @@ export default function WhatsAppParticipantsPage() {
     .map((p) => ({ chatId: p.participant_id, phone: p.participant_phone, name: p.participant_name }));
 
   const sendMutation = api.whatsapp.sendMessage.useMutation();
+  const logMutation = api.whatsapp.logParticipantMessage.useMutation();
 
-  // Sends the composed message to each selected participant individually (1:1) via the
-  // existing sendMessage webhook, using their participant_id as the chatId.
+  // Sends the composed message (and optional image) to each selected participant
+  // individually (1:1). Text-only sends go via the sendMessage webhook; image sends are
+  // routed through /api/whatsapp/send as multipart so Make.com receives the binary file.
+  // Each batch is logged to Supabase (logParticipantMessage) so history updates immediately.
   const handleSendMessages = useCallback(async () => {
     const trimmed = message.trim();
-    if (!trimmed || selectedRecipients.length === 0 || isSending) return;
+    const hasImage = image !== null;
+    if ((!trimmed && !hasImage) || selectedRecipients.length === 0 || isSending) return;
 
     setIsSending(true);
     const next = new Map<string, SendStatus>();
@@ -180,13 +223,33 @@ export default function WhatsAppParticipantsPage() {
 
     let successCount = 0;
     let errorCount = 0;
+    const makeErrors: string[] = [];
 
     for (const recipient of selectedRecipients) {
       try {
-        await sendMutation.mutateAsync({ accountId: activeAccount, chatId: recipient.chatId, message: trimmed });
+        if (hasImage) {
+          // Send via multipart API route so Make.com receives the file as binary
+          const formData = new FormData();
+          formData.append('chatId', recipient.chatId);
+          formData.append('accountId', activeAccount);
+          if (trimmed) formData.append('message', trimmed);
+          formData.append('file', image, image.name);
+
+          const res = await fetch('/api/whatsapp/send', { method: 'POST', body: formData });
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({})) as { makeError?: string };
+            if (json.makeError && !makeErrors.includes(json.makeError)) makeErrors.push(json.makeError);
+            throw new Error(json.makeError ?? 'Failed to send');
+          }
+        } else {
+          await sendMutation.mutateAsync({ accountId: activeAccount, chatId: recipient.chatId, message: trimmed });
+        }
         next.set(recipient.chatId, 'success');
         successCount++;
-      } catch {
+      } catch (err) {
+        if (err instanceof Error && err.message && !makeErrors.includes(err.message)) {
+          makeErrors.push(err.message);
+        }
         next.set(recipient.chatId, 'error');
         errorCount++;
       }
@@ -194,24 +257,40 @@ export default function WhatsAppParticipantsPage() {
     }
 
     setIsSending(false);
-    // Signal the history panel to refetch (Make.com logs the send on its side)
+
+    // Log this batch to Supabase so the history panel updates immediately (mirrors Broadcast)
+    const overallStatus = errorCount === 0 ? 'sent' : successCount === 0 ? 'failed' : 'partial';
+    logMutation.mutate({
+      accountId: activeAccount,
+      message: trimmed || undefined,
+      recipientIds: selectedRecipients.map((r) => r.chatId),
+      recipientPhones: selectedRecipients.map((r) => r.phone),
+      recipientNames: selectedRecipients.map((r) => r.name ?? ''),
+      hasFile: hasImage,
+      fileName: image?.name,
+      status: overallStatus,
+      makeError: makeErrors.length > 0 ? makeErrors.join('; ') : undefined,
+      sentCount: successCount,
+      failedCount: errorCount,
+    });
     setHistoryBump((n) => n + 1);
 
     if (errorCount === 0) {
       toast.success(`Message sent to ${successCount} contact${successCount !== 1 ? 's' : ''}`);
       setMessage('');
       setSelectedParticipantIds(new Set());
+      handleClearImage();
     } else if (successCount === 0) {
       toast.error(`Failed to send to all ${errorCount} contact${errorCount !== 1 ? 's' : ''}`);
     } else {
       toast(`Sent to ${successCount}, failed for ${errorCount}`, { icon: '⚠️' });
     }
-  }, [message, selectedRecipients, isSending, sendMutation, activeAccount]);
+  }, [message, image, selectedRecipients, isSending, sendMutation, logMutation, activeAccount, handleClearImage]);
 
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-(--color-text-faint)';
-  const canSend = message.trim().length > 0 && selectedRecipients.length > 0 && !isSending;
+  const canSend = (message.trim().length > 0 || image !== null) && selectedRecipients.length > 0 && !isSending;
   const sendSuccessCount = Array.from(sendResults.values()).filter((s) => s === 'success').length;
   const sendErrorCount = Array.from(sendResults.values()).filter((s) => s === 'error').length;
 
@@ -631,7 +710,7 @@ export default function WhatsAppParticipantsPage() {
           <div className="px-5 py-4 border-b border-(--color-border-subtle)">
             <h2 className="text-sm font-semibold text-(--color-text-primary)">Compose Message</h2>
             <p className="text-xs text-(--color-text-muted) mt-0.5">
-              Sent individually to each selected participant — tick contacts in the table above
+              Add a message, image, or both — sent individually to each selected participant (tick contacts in the table above)
             </p>
           </div>
 
@@ -641,7 +720,7 @@ export default function WhatsAppParticipantsPage() {
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value.slice(0, MAX_CHARS))}
-                placeholder="Type your message here..."
+                placeholder="Type your message here... (optional if sending an image)"
                 rows={6}
                 disabled={isSending}
                 className="w-full resize-none rounded-lg border border-(--color-border-default) bg-white px-4 py-3 text-sm text-(--color-text-primary) placeholder:text-(--color-text-faint) focus:outline-none focus:border-(--color-accent-primary) focus:ring-2 focus:ring-(--color-accent-primary)/10 transition leading-relaxed disabled:opacity-60"
@@ -650,6 +729,57 @@ export default function WhatsAppParticipantsPage() {
                 {charCount}/{MAX_CHARS}
               </div>
             </div>
+
+            {/* Image attachment */}
+            {image && imagePreview ? (
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)">
+                <Image
+                  src={imagePreview}
+                  alt="Attachment preview"
+                  width={56}
+                  height={56}
+                  className="w-14 h-14 rounded-md object-cover border border-(--color-border-subtle) shrink-0"
+                  unoptimized
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-(--color-text-primary) truncate">{image.name}</p>
+                  <p className="text-xs text-(--color-text-muted) mt-0.5">{formatFileSize(image.size)}</p>
+                </div>
+                <button
+                  onClick={handleClearImage}
+                  disabled={isSending}
+                  title="Remove image"
+                  className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-(--color-text-muted) hover:text-red-500 hover:bg-red-50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-dashed border-(--color-border-default) hover:border-[#25D366] hover:bg-[#25D366]/5 cursor-pointer transition-all group">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  disabled={isSending}
+                  className="hidden"
+                />
+                <svg
+                  width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className="text-(--color-text-muted) group-hover:text-[#25D366] transition shrink-0"
+                >
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+                <span className="text-xs text-(--color-text-muted) group-hover:text-[#25D366] transition">
+                  Attach image <span className="text-(--color-text-faint)">— optional, max 10MB</span>
+                </span>
+              </label>
+            )}
 
             {/* Send button */}
             <button
@@ -706,7 +836,7 @@ export default function WhatsAppParticipantsPage() {
         </div>
       )}
 
-      {/* Message history (individual sends — populated by Make.com) */}
+      {/* Message history (individual sends — logged by the app after each send) */}
       <ParticipantMessageHistory accountId={activeAccount} refreshBump={historyBump} />
     </div>
   );

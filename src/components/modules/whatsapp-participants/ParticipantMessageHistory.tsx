@@ -2,7 +2,7 @@
  * ParticipantMessageHistory - Paginated history of individual (1:1) WhatsApp messages
  * sent from the Participants page. Fetches log entries for a given WhatsApp account via
  * tRPC and displays each entry's timestamp (Sydney timezone), recipients, message
- * preview, and delivery status. Rows are populated by Make.com after each send.
+ * preview, and delivery status. Rows are logged by the app after each send.
  */
 'use client';
 

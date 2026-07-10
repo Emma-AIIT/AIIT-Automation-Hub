@@ -216,9 +216,47 @@ export const whatsappRouter = createTRPCRouter({
       return (data ?? []) as BroadcastLogEntry[];
     }),
 
+  // Log an individual (1:1) message batch after it completes. Written by the app itself
+  // (mirrors logBroadcast) so the Participants history updates immediately without waiting
+  // on Make.com. One row per send batch, storing every selected recipient.
+  logParticipantMessage: publicProcedure
+    .input(
+      z.object({
+        accountId: accountIdSchema,
+        message: z.string().optional(),
+        recipientIds: z.array(z.string()),
+        recipientPhones: z.array(z.string()),
+        recipientNames: z.array(z.string()),
+        hasFile: z.boolean().default(false),
+        fileName: z.string().optional(),
+        status: z.enum(["sent", "failed", "partial"]),
+        makeError: z.string().optional(),
+        sentCount: z.number().int().min(0),
+        failedCount: z.number().int().min(0),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { error } = await supabase.from("whatsapp_participant_message_log").insert({
+        account_id: input.accountId,
+        message: input.message ?? null,
+        recipient_ids: input.recipientIds,
+        recipient_phones: input.recipientPhones,
+        recipient_names: input.recipientNames,
+        has_file: input.hasFile,
+        file_name: input.fileName ?? null,
+        status: input.status,
+        make_error: input.makeError ?? null,
+        sent_count: input.sentCount,
+        failed_count: input.failedCount,
+      });
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      return { success: true };
+    }),
+
   // Returns the full individual participant message history, newest first — scoped to account.
   // Paginated in batches of 1000 so all history is kept (the UI paginates client-side).
-  // Rows are written by Make.com after each 1:1 send from the Participants page.
+  // Rows are written by the app (logParticipantMessage) after each 1:1 send.
   listParticipantMessageHistory: publicProcedure
     .input(z.object({ accountId: accountIdSchema }))
     .query(async ({ input }): Promise<ParticipantMessageLogEntry[]> => {
