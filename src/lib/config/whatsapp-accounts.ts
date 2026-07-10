@@ -28,7 +28,11 @@ export type WhatsAppAccountId =
   | 'susu-closets'
   | 'gim-foundation';
 
-export type WebhookType = 'syncGroups' | 'sendMessage' | 'syncParticipants';
+export type WebhookType =
+  | 'syncGroups'
+  | 'sendMessage'
+  | 'sendParticipantMessage'
+  | 'syncParticipants';
 
 export type WhatsAppAccount = {
   id: WhatsAppAccountId;
@@ -51,19 +55,22 @@ export const WHATSAPP_ACCOUNTS: WhatsAppAccount[] = [
 export function getWebhookUrl(accountId: WhatsAppAccountId, type: WebhookType): string {
   const map: Record<WhatsAppAccountId, Record<WebhookType, string | undefined>> = {
     'aiit-automation': {
-      syncGroups:       env.MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL,
-      sendMessage:      env.MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL,
-      syncParticipants: env.MAKE_WHATSAPP_PULL_PARTICIPANTS_WEBHOOK_URL,
+      syncGroups:             env.MAKE_WHATSAPP_PULL_GROUPS_WEBHOOK_URL,
+      sendMessage:            env.MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL,
+      sendParticipantMessage: env.MAKE_WHATSAPP_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL,
+      syncParticipants:       env.MAKE_WHATSAPP_PULL_PARTICIPANTS_WEBHOOK_URL,
     },
     'susu-closets': {
-      syncGroups:       env.MAKE_WHATSAPP_SUSU_PULL_GROUPS_WEBHOOK_URL,
-      sendMessage:      env.MAKE_WHATSAPP_SUSU_SEND_MESSAGE_WEBHOOK_URL,
-      syncParticipants: env.MAKE_WHATSAPP_SUSU_PULL_PARTICIPANTS_WEBHOOK_URL,
+      syncGroups:             env.MAKE_WHATSAPP_SUSU_PULL_GROUPS_WEBHOOK_URL,
+      sendMessage:            env.MAKE_WHATSAPP_SUSU_SEND_MESSAGE_WEBHOOK_URL,
+      sendParticipantMessage: env.MAKE_WHATSAPP_SUSU_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL,
+      syncParticipants:       env.MAKE_WHATSAPP_SUSU_PULL_PARTICIPANTS_WEBHOOK_URL,
     },
     'gim-foundation': {
-      syncGroups:       env.MAKE_WHATSAPP_GIM_PULL_GROUPS_WEBHOOK_URL,
-      sendMessage:      env.MAKE_WHATSAPP_GIM_SEND_MESSAGE_WEBHOOK_URL,
-      syncParticipants: env.MAKE_WHATSAPP_GIM_PULL_PARTICIPANTS_WEBHOOK_URL,
+      syncGroups:             env.MAKE_WHATSAPP_GIM_PULL_GROUPS_WEBHOOK_URL,
+      sendMessage:            env.MAKE_WHATSAPP_GIM_SEND_MESSAGE_WEBHOOK_URL,
+      sendParticipantMessage: env.MAKE_WHATSAPP_GIM_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL,
+      syncParticipants:       env.MAKE_WHATSAPP_GIM_PULL_PARTICIPANTS_WEBHOOK_URL,
     },
   };
 

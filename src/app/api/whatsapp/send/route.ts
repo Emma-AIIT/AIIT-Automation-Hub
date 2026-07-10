@@ -1,15 +1,17 @@
 /**
  * POST /api/whatsapp/send
- * Proxy endpoint called by the WhatsApp Broadcast page when sending an image attachment.
- * Accepts multipart/form-data (chatId, accountId, optional message, optional file) and
- * forwards it as multipart to the account-specific Make.com send-message webhook so
- * Make.com receives the file as binary. Text-only messages bypass this route and go
- * directly via tRPC. Enforces a 10 MB file size limit and validates the accountId.
+ * Proxy endpoint called when sending an image attachment (Broadcast page or Participants
+ * page). Accepts multipart/form-data (chatId, accountId, optional message, optional file,
+ * optional target) and forwards it as multipart to the correct account-specific Make.com
+ * webhook so Make.com receives the file as binary. `target` selects the webhook:
+ * 'participant' → individual 1:1 scenario; anything else (default) → group broadcast scenario.
+ * Text-only messages bypass this route and go directly via tRPC. Enforces a 10 MB file size
+ * limit and validates the accountId.
  */
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getWebhookUrl, WHATSAPP_ACCOUNTS } from '~/lib/config/whatsapp-accounts';
-import type { WhatsAppAccountId } from '~/lib/config/whatsapp-accounts';
+import type { WhatsAppAccountId, WebhookType } from '~/lib/config/whatsapp-accounts';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB - Make.com webhook limit
 
@@ -25,6 +27,7 @@ export async function POST(req: NextRequest) {
     const message = formData.get('message');
     const file = formData.get('file');
     const accountIdRaw = formData.get('accountId');
+    const target = formData.get('target');
 
     if (typeof chatId !== 'string' || !chatId) {
       return NextResponse.json({ error: 'chatId is required' }, { status: 400 });
@@ -39,7 +42,9 @@ export async function POST(req: NextRequest) {
     }
 
     const accountId = accountIdRaw as WhatsAppAccountId;
-    const webhookUrl = getWebhookUrl(accountId, 'sendMessage');
+    // 'participant' → dedicated 1:1 scenario; default → group broadcast scenario
+    const webhookType: WebhookType = target === 'participant' ? 'sendParticipantMessage' : 'sendMessage';
+    const webhookUrl = getWebhookUrl(accountId, webhookType);
 
     // Forward as multipart/form-data so Make.com receives the file as binary
     const outForm = new FormData();

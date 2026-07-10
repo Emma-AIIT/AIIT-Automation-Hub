@@ -167,6 +167,38 @@ export const whatsappRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  // Sends an individual (1:1) message from the Participants page. Posts to the dedicated
+  // participant-message Make webhook (separate scenario from group broadcasts). Text-only —
+  // image sends go through /api/whatsapp/send with target=participant so Make gets the binary.
+  sendParticipantMessage: publicProcedure
+    .input(
+      z.object({
+        accountId: accountIdSchema,
+        chatId: z.string().min(1),
+        message: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const webhookUrl = getWebhookUrl(input.accountId, "sendParticipantMessage");
+
+      const res = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: input.chatId, message: input.message }),
+      });
+
+      if (!res.ok) {
+        let makeError = `Webhook returned ${res.status}`;
+        try {
+          const body = await res.text();
+          if (body) makeError = body;
+        } catch { /* ignore */ }
+        throw new TRPCError({ code: "BAD_GATEWAY", message: makeError });
+      }
+
+      return { success: true };
+    }),
+
   // Log a broadcast after it completes (immediate sends only; scheduled stays in scheduled_messages)
   logBroadcast: publicProcedure
     .input(

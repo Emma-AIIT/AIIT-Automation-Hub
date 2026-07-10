@@ -204,7 +204,7 @@ export default function WhatsAppParticipantsPage() {
     .filter((p) => selectedParticipantIds.has(p.participant_id))
     .map((p) => ({ chatId: p.participant_id, phone: p.participant_phone, name: p.participant_name }));
 
-  const sendMutation = api.whatsapp.sendMessage.useMutation();
+  const sendMutation = api.whatsapp.sendParticipantMessage.useMutation();
   const logMutation = api.whatsapp.logParticipantMessage.useMutation();
 
   // Sends the composed message (and optional image) to each selected participant
@@ -232,6 +232,7 @@ export default function WhatsAppParticipantsPage() {
           const formData = new FormData();
           formData.append('chatId', recipient.chatId);
           formData.append('accountId', activeAccount);
+          formData.append('target', 'participant');
           if (trimmed) formData.append('message', trimmed);
           formData.append('file', image, image.name);
 
