@@ -52,7 +52,7 @@ function isUrl(s: string): boolean {
 }
 
 function isImageMessage(type: string | null, text: string | null): boolean {
-  if (type && type.toLowerCase().includes('image')) return true;
+  if (type?.toLowerCase().includes('image')) return true;
   if (text && isUrl(text) && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(text.trim())) return true;
   return false;
 }
