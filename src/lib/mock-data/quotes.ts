@@ -303,7 +303,7 @@ export interface SidebarModule {
   id: string;
   label: string;
   route: string;
-  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp" | "receipt";
+  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp" | "receipt" | "chat";
   badge?: { count: number; color: "red" | "blue" };
   disabled?: boolean;
   comingSoon?: boolean;
@@ -339,6 +339,12 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     label: "IT Support",
     route: "/automations/tickets",
     icon: "ticket",
+  },
+  {
+    id: "whatsapp-chats",
+    label: "WhatsApp Chats",
+    route: "/automations/whatsapp-chats",
+    icon: "chat",
   },
   {
     id: "whatsapp-groups",

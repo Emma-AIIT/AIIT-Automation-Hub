@@ -91,6 +91,26 @@ export interface ParticipantEntry {
   group_chat_name: string;
 }
 
+// A distinct chat thread (group or 1:1) derived from the whatsapp_chat_messages log.
+export interface ChatThread {
+  chat_id: string;
+  group_chat: string | null;
+  last_message_at: string | null;
+  message_count: number;
+}
+
+// A single WhatsApp message row logged by Make.com (matches the "Daily Chats" sheet columns).
+export interface ChatMessage {
+  id: string;
+  chat_id: string;
+  group_chat: string | null;
+  sender_name: string | null;
+  text_msg: string | null;
+  type_of_message: string | null;
+  sent_at: string;
+  created_at: string;
+}
+
 export const whatsappRouter = createTRPCRouter({
   // Reads from Supabase DB cache — fast, no Make.com call
   getGroups: publicProcedure
@@ -523,5 +543,84 @@ export const whatsappRouter = createTRPCRouter({
         groupName: input.groupName,
         started: true,
       };
+    }),
+
+  // Chats: distinct chat threads for the Chats page, newest activity first — scoped to account.
+  // Aggregated in-app from the whatsapp_chat_messages log (populated by Make.com). Batches of
+  // 1000 keep the full history; we only pull the columns needed to build the thread list.
+  listChatThreads: publicProcedure
+    .input(z.object({ accountId: accountIdSchema }))
+    .query(async ({ input }): Promise<ChatThread[]> => {
+      const supabase = createAdminClient();
+      const PAGE_SIZE = 1000;
+      let offset = 0;
+      let hasMore = true;
+      const threads = new Map<string, ChatThread>();
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("whatsapp_chat_messages")
+          .select("chat_id, group_chat, sent_at")
+          .eq("account_id", input.accountId)
+          .order("sent_at", { ascending: false })
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+        const batch = (data ?? []) as { chat_id: string; group_chat: string | null; sent_at: string | null }[];
+
+        for (const row of batch) {
+          if (!row.chat_id) continue;
+          const existing = threads.get(row.chat_id);
+          if (!existing) {
+            threads.set(row.chat_id, {
+              chat_id: row.chat_id,
+              group_chat: row.group_chat,
+              last_message_at: row.sent_at,
+              message_count: 1,
+            });
+          } else {
+            existing.message_count += 1;
+            if (!existing.group_chat && row.group_chat) existing.group_chat = row.group_chat;
+            if (row.sent_at && (!existing.last_message_at || row.sent_at > existing.last_message_at)) {
+              existing.last_message_at = row.sent_at;
+            }
+          }
+        }
+
+        hasMore = batch.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+      }
+
+      return Array.from(threads.values()).sort((a, b) =>
+        (b.last_message_at ?? "").localeCompare(a.last_message_at ?? "")
+      );
+    }),
+
+  // Chats: all messages for one chat thread, oldest first (chat order) — scoped to account.
+  // Read-only; rows are written by Make.com from the WhatsApp API feed.
+  listChatMessages: publicProcedure
+    .input(z.object({ accountId: accountIdSchema, chatId: z.string().min(1) }))
+    .query(async ({ input }): Promise<ChatMessage[]> => {
+      const supabase = createAdminClient();
+      const PAGE_SIZE = 1000;
+      let offset = 0;
+      let hasMore = true;
+      const all: ChatMessage[] = [];
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("whatsapp_chat_messages")
+          .select("*")
+          .eq("account_id", input.accountId)
+          .eq("chat_id", input.chatId)
+          .order("sent_at", { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+        const batch = (data ?? []) as ChatMessage[];
+        all.push(...batch);
+        hasMore = batch.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+      }
+
+      return all;
     }),
 });
