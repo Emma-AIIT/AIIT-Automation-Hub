@@ -29,6 +29,10 @@ import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 
+// Per-group client results no longer exist (sends run server-side); GroupSelector
+// still accepts the map so pass a stable empty one.
+const EMPTY_SEND_RESULTS = new Map<string, SendStatus>();
+
 const MAX_CHARS = 1000;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -44,7 +48,6 @@ export default function WhatsAppBroadcastPage() {
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [sendResults, setSendResults] = useState<Map<string, SendStatus>>(new Map());
   const [isSending, setIsSending] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleCreatedBump, setScheduleCreatedBump] = useState(0);
@@ -57,7 +60,6 @@ export default function WhatsAppBroadcastPage() {
     setImage(null);
     setImagePreview(null);
     setSelectedIds(new Set());
-    setSendResults(new Map());
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
@@ -81,9 +83,6 @@ export default function WhatsAppBroadcastPage() {
     },
     onError: (err) => toast.error(`Failed to pull groups: ${err.message}`, { duration: 6000 }),
   });
-
-  const sendMutation = api.whatsapp.sendMessage.useMutation();
-  const logBroadcastMutation = api.whatsapp.logBroadcast.useMutation();
 
   const isRefreshing = syncMutation.isPending;
   const isLoading = groupsLoading || isRefreshing;
@@ -110,7 +109,6 @@ export default function WhatsAppBroadcastPage() {
 
   const handleRefresh = useCallback(() => {
     setSelectedIds(new Set());
-    setSendResults(new Map());
     syncMutation.mutate({ accountId: activeAccount });
   }, [syncMutation, activeAccount]);
 
@@ -136,6 +134,10 @@ export default function WhatsAppBroadcastPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
+  // Queues the whole broadcast in ONE request — the server fans out to Make.com in the
+  // background and the history panel below shows live progress. The composer clears as
+  // soon as the broadcast is accepted, so the next message can be queued immediately
+  // and the tab can safely be closed.
   const handleSend = useCallback(async () => {
     const hasMessage = message.trim().length > 0;
     const hasImage = image !== null;
@@ -143,79 +145,46 @@ export default function WhatsAppBroadcastPage() {
 
     setIsSending(true);
     const ids = Array.from(selectedIds);
-    const results = new Map<string, SendStatus>();
-    ids.forEach((id) => results.set(id, 'pending'));
-    setSendResults(new Map(results));
+    const names = ids.map((id) => groups.find((g) => g.id === id)?.name ?? id);
 
-    let successCount = 0;
-    let errorCount = 0;
-    const makeErrors: string[] = [];
+    try {
+      const formData = new FormData();
+      formData.append('accountId', activeAccount);
+      formData.append('groupIds', JSON.stringify(ids));
+      formData.append('groupNames', JSON.stringify(names));
+      if (hasMessage) formData.append('message', message.trim());
+      if (image) formData.append('file', image, image.name);
 
-    for (const chatId of ids) {
-      try {
-        if (hasImage) {
-          // Send via multipart API route so Make.com receives the file as binary
-          const formData = new FormData();
-          formData.append('chatId', chatId);
-          formData.append('accountId', activeAccount);
-          if (hasMessage) formData.append('message', message.trim());
-          formData.append('file', image, image.name);
-
-          const res = await fetch('/api/whatsapp/send', { method: 'POST', body: formData });
-          if (!res.ok) {
-            const json = await res.json().catch(() => ({})) as { makeError?: string };
-            if (json.makeError) makeErrors.push(json.makeError);
-            throw new Error(json.makeError ?? 'Failed to send');
-          }
-        } else {
-          await sendMutation.mutateAsync({ accountId: activeAccount, chatId, message: message.trim() });
-        }
-        results.set(chatId, 'success');
-        successCount++;
-      } catch (err) {
-        // Capture Make.com error message from tRPC error (text send path)
-        if (err instanceof Error && !makeErrors.includes(err.message)) {
-          makeErrors.push(err.message);
-        }
-        results.set(chatId, 'error');
-        errorCount++;
+      const res = await fetch('/api/whatsapp/broadcast', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(json.error ?? 'Failed to queue broadcast');
       }
-      setSendResults(new Map(results));
+
+      // Accepted — clear the composer so the next broadcast can be queued right away
+      setMessage('');
+      setImage(null);
+      setImagePreview(null);
+      setSelectedIds(new Set());
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setBroadcastHistoryBump((n) => n + 1);
+
+      toast.success(
+        `Queued for ${ids.length} group${ids.length !== 1 ? 's' : ''} — sending in background. Safe to close this tab.`,
+        { duration: 7000 },
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to queue broadcast', { duration: 7000 });
+    } finally {
+      setIsSending(false);
     }
-
-    setIsSending(false);
-
-    // Log broadcast to Supabase (fire-and-forget)
-    const overallStatus = errorCount === 0 ? 'sent' : successCount === 0 ? 'failed' : 'partial';
-    logBroadcastMutation.mutate({
-      accountId: activeAccount,
-      message: message.trim() || undefined,
-      groupIds: ids,
-      groupNames: ids.map((id) => groups.find((g) => g.id === id)?.name ?? id),
-      hasFile: hasImage,
-      fileName: image?.name,
-      status: overallStatus,
-      makeError: makeErrors.length > 0 ? makeErrors.join('; ') : undefined,
-      sentCount: successCount,
-      failedCount: errorCount,
-    });
-    setBroadcastHistoryBump((n) => n + 1);
-
-    if (errorCount === 0) {
-      toast.success(`Message sent to ${successCount} group${successCount !== 1 ? 's' : ''}`);
-    } else if (successCount === 0) {
-      toast.error(`Failed to send to all ${errorCount} groups`);
-    } else {
-      toast(`Sent to ${successCount}, failed for ${errorCount}`, { icon: '⚠️' });
-    }
-  }, [message, image, selectedIds, isSending, activeAccount, sendMutation, logBroadcastMutation, groups]);
+  }, [message, image, selectedIds, isSending, activeAccount, groups]);
 
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
 
   const canSend = (message.trim().length > 0 || image !== null) && selectedIds.size > 0 && !isSending;
-  const hasSendResults = sendResults.size > 0;
 
   return (
     <div className="p-6 md:p-8 space-y-6">
@@ -364,7 +333,7 @@ export default function WhatsAppBroadcastPage() {
                     <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                     </svg>
-                    Sending...
+                    Queuing...
                   </>
                 ) : (
                   <>
@@ -401,34 +370,11 @@ export default function WhatsAppBroadcastPage() {
               </button>
             </div>
 
-            {/* Send summary */}
-            {hasSendResults && !isSending && (
-              <div className="rounded-lg border border-(--color-border-subtle) bg-(--color-bg-secondary) px-4 py-3">
-                <p className="text-xs font-medium text-(--color-text-secondary) mb-2">Last send results</p>
-                <div className="flex items-center gap-4">
-                  {(() => {
-                    const successCount = Array.from(sendResults.values()).filter((s) => s === 'success').length;
-                    const errorCount = Array.from(sendResults.values()).filter((s) => s === 'error').length;
-                    return (
-                      <>
-                        {successCount > 0 && (
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full bg-[#25D366]" />
-                            <span className="text-xs text-(--color-text-secondary)">{successCount} sent</span>
-                          </div>
-                        )}
-                        {errorCount > 0 && (
-                          <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full bg-red-400" />
-                            <span className="text-xs text-(--color-text-secondary)">{errorCount} failed</span>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
+            {/* Background-send note */}
+            <p className="text-xs text-(--color-text-faint) leading-relaxed">
+              Sends run in the background — once queued you can compose the next message
+              or close this tab. Live progress appears in Broadcast History below.
+            </p>
           </div>
         </div>
 
@@ -447,7 +393,7 @@ export default function WhatsAppBroadcastPage() {
               errorMessage={groupsErrorMsg?.message}
               notFetchedYet={notFetchedYet}
               selectedIds={selectedIds}
-              sendResults={sendResults}
+              sendResults={EMPTY_SEND_RESULTS}
               onToggle={handleToggle}
               onSelectAll={handleSelectAll}
               onClearAll={handleClearAll}

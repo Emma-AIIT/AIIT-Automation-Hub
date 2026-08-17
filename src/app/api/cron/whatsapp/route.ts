@@ -10,6 +10,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { getWebhookUrl } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
+import { sendAlertEmail } from "~/lib/server/alerts";
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
@@ -50,6 +51,10 @@ export async function GET(req: NextRequest) {
           error: `Send webhook not configured for account ${msg.account_id}`,
         })
         .eq("id", msg.id);
+      await sendAlertEmail(
+        `[AIIT Hub] Scheduled WhatsApp message FAILED (${msg.account_id})`,
+        `A scheduled message could not be sent: no send webhook is configured for account ${msg.account_id}.\n\nMessage: ${(msg.message as string).slice(0, 300)}`,
+      );
       continue;
     }
 
@@ -73,6 +78,14 @@ export async function GET(req: NextRequest) {
         error: allOk ? null : "One or more groups failed to receive the message",
       })
       .eq("id", msg.id);
+
+    if (!allOk) {
+      const failedCount = results.filter((r) => r.status === "rejected").length;
+      await sendAlertEmail(
+        `[AIIT Hub] Scheduled WhatsApp message FAILED (${msg.account_id})`,
+        `A scheduled message failed for ${failedCount} of ${groupIds.length} groups.\n\nAccount: ${msg.account_id}\nMessage: ${(msg.message as string).slice(0, 300)}\nGroups: ${(msg.group_names as string[]).join(", ")}`,
+      );
+    }
   }
 
   return NextResponse.json({ processed: due.length });

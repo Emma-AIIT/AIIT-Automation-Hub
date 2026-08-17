@@ -22,6 +22,7 @@ import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { TRPCError } from "@trpc/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { WHATSAPP_ACCOUNTS, getWebhookUrl } from "~/lib/config/whatsapp-accounts";
+import { sendAlertEmail } from "~/lib/server/alerts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 
 const accountIdSchema = z.enum(
@@ -52,7 +53,7 @@ export interface BroadcastLogEntry {
   group_names: string[];
   has_file: boolean;
   file_name: string | null;
-  status: "sent" | "failed" | "partial";
+  status: "queued" | "sending" | "sent" | "failed" | "partial";
   make_error: string | null;
   sent_count: number;
   failed_count: number;
@@ -134,11 +135,21 @@ export const whatsappRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       const webhookUrl = getWebhookUrl(input.accountId, "syncGroups");
 
-      const res = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trigger: "pull_groups" }),
-      });
+      let res: Response;
+      try {
+        res = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trigger: "pull_groups" }),
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Network error reaching Make.com";
+        await sendAlertEmail(
+          `[AIIT Hub] WhatsApp group refresh FAILED (${input.accountId})`,
+          `The "Refresh groups" sync could not reach Make.com.\n\nAccount: ${input.accountId}\nError: ${msg}`,
+        );
+        throw new TRPCError({ code: "BAD_GATEWAY", message: msg });
+      }
 
       if (!res.ok) {
         let makeError = `Webhook returned ${res.status}`;
@@ -146,6 +157,10 @@ export const whatsappRouter = createTRPCRouter({
           const body = await res.text();
           if (body) makeError = body;
         } catch { /* ignore */ }
+        await sendAlertEmail(
+          `[AIIT Hub] WhatsApp group refresh FAILED (${input.accountId})`,
+          `The "Refresh groups" sync failed in Make.com.\n\nAccount: ${input.accountId}\nError: ${makeError}`,
+        );
         throw new TRPCError({ code: "BAD_GATEWAY", message: makeError });
       }
 
@@ -530,12 +545,29 @@ export const whatsappRouter = createTRPCRouter({
 
       // Fire-and-forget: trigger Make.com and respond to the client immediately so the
       // success toast always shows. Long-running syncs (e.g. 600+ participants) would
-      // otherwise time out the client before Make.com responds.
+      // otherwise time out the client before Make.com responds. Failures surface via
+      // alert email since the client has already moved on.
       void fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
-      }).catch(() => { /* fire-and-forget */ });
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            await sendAlertEmail(
+              `[AIIT Hub] WhatsApp participant sync FAILED (${input.accountId})`,
+              `The participant sync failed in Make.com.\n\nAccount: ${input.accountId}\nGroup: ${input.groupName} (${input.groupId})\nError: ${text || `Webhook returned ${res.status}`}`,
+            );
+          }
+        })
+        .catch(async (err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Network error reaching Make.com";
+          await sendAlertEmail(
+            `[AIIT Hub] WhatsApp participant sync FAILED (${input.accountId})`,
+            `The participant sync could not reach Make.com.\n\nAccount: ${input.accountId}\nGroup: ${input.groupName} (${input.groupId})\nError: ${msg}`,
+          );
+        });
 
       return {
         success: true,

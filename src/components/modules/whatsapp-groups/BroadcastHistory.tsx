@@ -5,7 +5,7 @@
  */
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import type { BroadcastLogEntry } from '@/server/api/routers/whatsapp';
@@ -18,10 +18,14 @@ function formatSydneyTime(isoString: string): string {
 }
 
 const STATUS_STYLES: Record<BroadcastLogEntry['status'], { dot: string; label: string; badge: string }> = {
+  queued:  { dot: 'bg-sky-400 animate-pulse',  label: 'Queued',   badge: 'bg-sky-50 text-sky-600 border-sky-200' },
+  sending: { dot: 'bg-sky-500 animate-pulse',  label: 'Sending…', badge: 'bg-sky-50 text-sky-700 border-sky-200' },
   sent:    { dot: 'bg-[#25D366]', label: 'Sent',    badge: 'bg-[#25D366]/8 text-[#1a9e4e] border-[#25D366]/20' },
   failed:  { dot: 'bg-red-400',   label: 'Failed',  badge: 'bg-red-50 text-red-600 border-red-200' },
   partial: { dot: 'bg-amber-400', label: 'Partial', badge: 'bg-amber-50 text-amber-600 border-amber-200' },
 };
+
+const ACTIVE_STATUSES: BroadcastLogEntry['status'][] = ['queued', 'sending'];
 
 interface BroadcastHistoryProps {
   accountId: WhatsAppAccountId;
@@ -32,17 +36,20 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
+  const [pollFast, setPollFast] = useState(false);
   const { data: history = [], isLoading, refetch } = api.whatsapp.listBroadcastHistory.useQuery(
     { accountId },
-    { refetchInterval: 60_000 },
+    // Poll every 4s while a broadcast is queued/sending so progress shows live
+    { refetchInterval: pollFast ? 4_000 : 60_000 },
   );
 
-  // Refetch when parent signals a new broadcast just completed
-  const prevBump = { current: refreshBump };
-  if (prevBump.current !== refreshBump) {
-    void refetch();
-    prevBump.current = refreshBump;
-  }
+  const hasActive = history.some((e) => ACTIVE_STATUSES.includes(e.status));
+  if (hasActive !== pollFast) setPollFast(hasActive);
+
+  // Refetch when parent signals a new broadcast was just queued
+  useEffect(() => {
+    if (refreshBump !== undefined && refreshBump > 0) void refetch();
+  }, [refreshBump, refetch]);
 
   const toggleError = (id: string) => {
     setExpandedErrors((prev) => {
@@ -75,7 +82,7 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
               </span>
             )}
           </div>
-          <p className="text-xs text-(--color-text-muted) mt-0.5">Log of messages sent immediately from this page</p>
+          <p className="text-xs text-(--color-text-muted) mt-0.5">Live status of queued and sent broadcasts from this page</p>
         </div>
         <button
           onClick={() => void refetch()}
