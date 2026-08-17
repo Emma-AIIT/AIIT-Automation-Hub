@@ -2,12 +2,14 @@
  * GET /api/cron/whatsapp
  * Cron endpoint — called by Vercel Cron (secured with CRON_SECRET bearer token).
  * Fetches all pending scheduled_messages whose scheduled_at time has passed,
- * then fans out each message to its target group IDs via the Make.com
- * MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL. Updates each row to "sent" or "failed"
- * depending on whether all group sends succeeded.
+ * then fans out each message to its target group IDs via the account-specific
+ * Make.com send-message webhook (resolved from the row's account_id). Updates
+ * each row to "sent" or "failed" depending on whether all group sends succeeded.
  */
 import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
+import { getWebhookUrl } from "~/lib/config/whatsapp-accounts";
+import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
@@ -31,13 +33,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ processed: 0 });
   }
 
-  const webhookUrl = process.env.MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL;
-  if (!webhookUrl) {
-    return NextResponse.json({ error: "MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL not configured" }, { status: 500 });
-  }
-
   for (const msg of due) {
     const groupIds = msg.group_ids as string[];
+
+    // Resolve the send webhook for this row's account — each account has its own
+    // Make.com scenario / Green API instance
+    let webhookUrl: string;
+    try {
+      webhookUrl = getWebhookUrl(msg.account_id as WhatsAppAccountId, "sendMessage");
+    } catch {
+      await supabase
+        .from("scheduled_messages")
+        .update({
+          status: "failed",
+          sent_at: new Date().toISOString(),
+          error: `Send webhook not configured for account ${msg.account_id}`,
+        })
+        .eq("id", msg.id);
+      continue;
+    }
 
     const results = await Promise.allSettled(
       groupIds.map((chatId: string) =>

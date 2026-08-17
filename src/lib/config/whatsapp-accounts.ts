@@ -6,6 +6,7 @@
  *
  * Active accounts:
  *   - aiit-automation: AIIT Automation (fully active)
+ *   - aiit-business:   AIIT Business Account
  *
  * Configured but inactive (tabs hidden in UI — un-comment in WHATSAPP_ACCOUNTS to enable):
  *   - susu-closets:   Susu Closets
@@ -25,6 +26,7 @@ import { env } from '~/env';
 
 export type WhatsAppAccountId =
   | 'aiit-automation'
+  | 'aiit-business'
   | 'susu-closets'
   | 'gim-foundation';
 
@@ -43,6 +45,7 @@ export type WhatsAppAccount = {
 
 export const WHATSAPP_ACCOUNTS: WhatsAppAccount[] = [
   { id: 'aiit-automation', name: 'AIIT Automation', color: 'blue' },
+  { id: 'aiit-business',   name: 'AIIT Business Account', color: 'amber' },
   // { id: 'susu-closets',    name: 'Susu Closets',    color: 'pink' },   // not set up yet
   // { id: 'gim-foundation',  name: 'GIM Foundation',  color: 'green' },  // not set up yet
 ];
@@ -59,6 +62,12 @@ export function getWebhookUrl(accountId: WhatsAppAccountId, type: WebhookType): 
       sendMessage:            env.MAKE_WHATSAPP_SEND_MESSAGE_WEBHOOK_URL,
       sendParticipantMessage: env.MAKE_WHATSAPP_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL,
       syncParticipants:       env.MAKE_WHATSAPP_PULL_PARTICIPANTS_WEBHOOK_URL,
+    },
+    'aiit-business': {
+      syncGroups:             env.MAKE_WHATSAPP_BUSINESS_PULL_GROUPS_WEBHOOK_URL,
+      sendMessage:            env.MAKE_WHATSAPP_BUSINESS_SEND_MESSAGE_WEBHOOK_URL,
+      sendParticipantMessage: env.MAKE_WHATSAPP_BUSINESS_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL,
+      syncParticipants:       env.MAKE_WHATSAPP_BUSINESS_PULL_PARTICIPANTS_WEBHOOK_URL,
     },
     'susu-closets': {
       syncGroups:             env.MAKE_WHATSAPP_SUSU_PULL_GROUPS_WEBHOOK_URL,
