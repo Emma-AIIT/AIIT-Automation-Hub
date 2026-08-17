@@ -11,6 +11,8 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { env } from "~/env";
+import { WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 
 /** Selected groups are read from Supabase (whatsapp_dashboard_groups). Seed via scripts/seed-whatsapp-dashboard-groups.sql */
 
@@ -53,12 +55,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "File too large (max 10MB)" }, { status: 413 });
     }
 
+    // Optional accountId form field — defaults to the original account for existing callers
+    const accountIdRaw = formData.get("accountId");
+    const accountId: WhatsAppAccountId =
+      typeof accountIdRaw === "string" && WHATSAPP_ACCOUNTS.some((a) => a.id === accountIdRaw)
+        ? (accountIdRaw as WhatsAppAccountId)
+        : "aiit-automation";
+
     const supabase = createAdminClient();
 
     // Which groups count as "selected" comes from the DB (seed via scripts/seed-whatsapp-dashboard-groups.sql)
     const { data: dashboardRows, error: dashboardError } = await supabase
       .from("whatsapp_dashboard_groups")
-      .select("group_id");
+      .select("group_id")
+      .eq("account_id", accountId);
     if (dashboardError) {
       return NextResponse.json({ error: dashboardError.message }, { status: 500 });
     }
@@ -99,13 +109,14 @@ export async function POST(req: NextRequest) {
       const batch = participants.slice(i, i + BATCH);
       const { error } = await supabase.from("whatsapp_group_participants").upsert(
         batch.map((p) => ({
+          account_id: accountId,
           group_chat_id: p.group_chat_id,
           group_chat_name: p.group_chat_name,
           participant_id: p.participant_id,
           participant_phone: p.participant_phone,
           participant_name: p.participant_name,
         })),
-        { onConflict: "group_chat_id,participant_id" }
+        { onConflict: "account_id,group_chat_id,participant_id" }
       );
       if (error) {
         console.error("[import-participants-csv] Supabase upsert error:", error);
