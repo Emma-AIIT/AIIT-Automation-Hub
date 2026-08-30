@@ -53,7 +53,7 @@ export interface BroadcastLogEntry {
   group_names: string[];
   has_file: boolean;
   file_name: string | null;
-  status: "queued" | "sending" | "sent" | "failed" | "partial";
+  status: "queued" | "sending" | "sent" | "failed" | "partial" | "not_sent";
   make_error: string | null;
   sent_count: number;
   failed_count: number;
