@@ -18,11 +18,14 @@ function formatSydneyTime(isoString: string): string {
 }
 
 const STATUS_STYLES: Record<BroadcastLogEntry['status'], { dot: string; label: string; badge: string }> = {
-  queued:  { dot: 'bg-sky-400 animate-pulse',  label: 'Queued',   badge: 'bg-sky-50 text-sky-600 border-sky-200' },
-  sending: { dot: 'bg-sky-500 animate-pulse',  label: 'Sending…', badge: 'bg-sky-50 text-sky-700 border-sky-200' },
-  sent:    { dot: 'bg-[#25D366]', label: 'Sent',    badge: 'bg-[#25D366]/8 text-[#1a9e4e] border-[#25D366]/20' },
-  failed:  { dot: 'bg-red-400',   label: 'Failed',  badge: 'bg-red-50 text-red-600 border-red-200' },
-  partial: { dot: 'bg-amber-400', label: 'Partial', badge: 'bg-amber-50 text-amber-600 border-amber-200' },
+  queued:   { dot: 'bg-sky-400 animate-pulse',  label: 'Queued',   badge: 'bg-sky-50 text-sky-600 border-sky-200' },
+  sending:  { dot: 'bg-sky-500 animate-pulse',  label: 'Sending…', badge: 'bg-sky-50 text-sky-700 border-sky-200' },
+  sent:     { dot: 'bg-[#25D366]', label: 'Sent',     badge: 'bg-[#25D366]/8 text-[#1a9e4e] border-[#25D366]/20' },
+  failed:   { dot: 'bg-red-400',   label: 'Failed',   badge: 'bg-red-50 text-red-600 border-red-200' },
+  partial:  { dot: 'bg-amber-400', label: 'Partial',  badge: 'bg-amber-50 text-amber-600 border-amber-200' },
+  // Swept by /api/cron/whatsapp: the send was cut off before it finished, so
+  // delivery is unknown. Deliberately not red: this is not a Make.com rejection.
+  not_sent: { dot: 'bg-slate-400', label: 'Not sent', badge: 'bg-slate-100 text-slate-600 border-slate-300' },
 };
 
 const ACTIVE_STATUSES: BroadcastLogEntry['status'][] = ['queued', 'sending'];
