@@ -10,6 +10,12 @@
  * assistant keeps its configured voice, transcriber and model while saying what
  * Ali wrote. Nothing about the stored assistant is modified.
  *
+ * The override is built from the assistant's own model config, fetched once per
+ * batch, with only the messages swapped. VAPI's assistantOverrides.model is a
+ * discriminated union requiring provider and model on every variant, and it
+ * replaces the whole model object, so rebuilding it from scratch would both fail
+ * validation and drop any tools or tuning set on the assistant.
+ *
  * Dialling runs in bounded parallel batches with a per-request timeout. A batch
  * abandoned mid-dial (function killed, deploy) is swept to "interrupted" by
  * /api/cron/outbound-calls rather than sitting on "dialling" forever.
@@ -36,15 +42,56 @@ const MAX_NUMBERS = 200;
 
 type Target = { id: string; phone_number: string };
 
+/** The assistant's LLM config, as VAPI returns it on GET /assistant/{id}. */
+type VapiModel = Record<string, unknown> & { provider?: string; model?: string };
+
+/**
+ * Builds the model override for a batch.
+ *
+ * assistantOverrides.model is a discriminated union in the VAPI schema and every
+ * variant requires BOTH provider and model, so sending messages on their own is
+ * rejected outright. Read the assistant's current model and spread it, replacing
+ * only the messages. Spreading rather than rebuilding matters: the override
+ * replaces the whole model object, so anything hand-set on the assistant
+ * (temperature, maxTokens, tools, toolIds, knowledge base) would be silently
+ * dropped for the call if we sent a bare provider/model pair.
+ */
+async function buildModelOverride(
+  apiKey: string,
+  assistantId: string,
+  script: string,
+): Promise<VapiModel> {
+  const res = await fetch(`${VAPI_BASE_URL}/assistant/${assistantId}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(DIAL_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Could not read the agent's settings from VAPI: ${text || res.status}`);
+  }
+
+  const assistant = (await res.json()) as { model?: VapiModel };
+  const base = assistant.model;
+
+  if (!base?.provider || !base?.model) {
+    throw new Error(
+      "This agent has no LLM provider/model set in VAPI, so its script cannot be overridden. Pick a different agent.",
+    );
+  }
+
+  return { ...base, messages: [{ role: "system", content: script }] };
+}
+
 async function placeCall(opts: {
   apiKey: string;
   assistantId: string;
   phoneNumberId: string;
-  script: string;
+  modelOverride: VapiModel;
   firstMessage: string | null;
   number: string;
 }): Promise<string> {
-  const { apiKey, assistantId, phoneNumberId, script, firstMessage, number } = opts;
+  const { apiKey, assistantId, phoneNumberId, modelOverride, firstMessage, number } = opts;
 
   const res = await fetch(`${VAPI_BASE_URL}/call`, {
     method: "POST",
@@ -57,7 +104,7 @@ async function placeCall(opts: {
       phoneNumberId,
       customer: { number },
       assistantOverrides: {
-        model: { messages: [{ role: "system", content: script }] },
+        model: modelOverride,
         ...(firstMessage ? { firstMessage } : {}),
       },
     }),
@@ -99,6 +146,33 @@ async function runBatch(opts: {
 
   await supabase.from("outbound_call_batches").update({ status: "dialling" }).eq("id", batchId);
 
+  // Resolved once per batch, not per call. If the agent cannot be read, fail the
+  // whole batch here rather than firing the same broken payload at every number.
+  let modelOverride: VapiModel;
+  try {
+    modelOverride = await buildModelOverride(apiKey, assistantId, script);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await supabase
+      .from("outbound_call_batches")
+      .update({ status: "failed", error: msg, completed_at: new Date().toISOString() })
+      .eq("id", batchId);
+    await supabase
+      .from("outbound_calls")
+      .update({ status: "failed", error: "Not dialled, the agent could not be prepared" })
+      .eq("batch_id", batchId);
+    await sendAlertEmail(
+      `[AIIT Hub] Outbound call batch FAILED before dialling`,
+      [
+        `A calling batch could not start, so no numbers were dialled.`,
+        ``,
+        `Agent: ${assistantName ?? assistantId}`,
+        `Reason: ${msg}`,
+      ].join("\n"),
+    );
+    return;
+  }
+
   let dialled = 0;
   let failed = 0;
   const errors: string[] = [];
@@ -108,7 +182,7 @@ async function runBatch(opts: {
 
     const results = await Promise.allSettled(
       slice.map((t) =>
-        placeCall({ apiKey, assistantId, phoneNumberId, script, firstMessage, number: t.phone_number }),
+        placeCall({ apiKey, assistantId, phoneNumberId, modelOverride, firstMessage, number: t.phone_number }),
       ),
     );
 
