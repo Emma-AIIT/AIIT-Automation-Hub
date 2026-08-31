@@ -11,10 +11,16 @@
 -- ── Scripts ──────────────────────────────────────────────────────────────────
 -- Category mirrors the service lines in Ali's flow diagram (AI, Web Dev, IT).
 -- The two SMS bodies are per script so the follow-up matches what was pitched.
+-- assistant_id / phone_number_id ride along with the script so loading a saved
+-- script restores the whole setup, not just the words. A campaign is the script
+-- AND who reads it from which number; splitting them meant re-picking both
+-- dropdowns every time.
 alter table public.call_scripts
   add column if not exists category            text,
   add column if not exists sms_answered        text,
-  add column if not exists sms_not_answered    text;
+  add column if not exists sms_not_answered    text,
+  add column if not exists assistant_id        text,
+  add column if not exists phone_number_id     text;
 
 -- ── Batches ──────────────────────────────────────────────────────────────────
 alter table public.outbound_call_batches
