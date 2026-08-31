@@ -15,14 +15,22 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { sendAlertEmail } from "~/lib/server/alerts";
 
-/** Comfortably above the 300s maxDuration of the dialling route. */
-const STUCK_AFTER_MINUTES = 10;
+/**
+ * A batch is only stuck if nothing has been dialled on it for this long.
+ *
+ * It cannot be measured from when the batch started any more: dialling is a drip
+ * capped at MAX_CONCURRENT_CALLS, so a long list legitimately stays in
+ * "dialling" for hours. What is NOT legitimate is no number being rung for an
+ * hour, which means the drip has stalled rather than merely being patient.
+ */
+const NO_PROGRESS_MINUTES = 60;
 
 const INTERRUPTED_NOTE =
   "Dialling was interrupted before the batch finished. Numbers already dialled were not called again.";
 
 type StuckBatch = {
   id: string;
+  created_at: string;
   script_name: string;
   assistant_name: string | null;
   assistant_id: string;
@@ -38,11 +46,11 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = createAdminClient();
-  const cutoff = new Date(Date.now() - STUCK_AFTER_MINUTES * 60_000).toISOString();
+  const cutoff = new Date(Date.now() - NO_PROGRESS_MINUTES * 60_000).toISOString();
 
-  const { data: stuck, error } = await supabase
+  const { data: candidates, error } = await supabase
     .from("outbound_call_batches")
-    .select("id, script_name, assistant_name, assistant_id, total_count, dialled_count, failed_count")
+    .select("id, script_name, assistant_name, assistant_id, total_count, dialled_count, failed_count, created_at")
     .in("status", ["queued", "dialling"])
     .lt("created_at", cutoff);
 
@@ -51,12 +59,33 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  if (!stuck || stuck.length === 0) {
+  if (!candidates || candidates.length === 0) {
+    return NextResponse.json({ swept: 0 });
+  }
+
+  // Being old is not being stuck. A long list drips out over hours by design, so
+  // only a batch that has rung nobody recently counts as stalled.
+  const stuck: StuckBatch[] = [];
+  for (const batch of candidates as StuckBatch[]) {
+    const { data: lastDial } = await supabase
+      .from("outbound_calls")
+      .select("dialled_at")
+      .eq("batch_id", batch.id)
+      .not("dialled_at", "is", null)
+      .order("dialled_at", { ascending: false })
+      .limit(1);
+
+    const rows = (lastDial ?? []) as Array<{ dialled_at: string }>;
+    const lastActivity = rows[0]?.dialled_at ?? batch.created_at;
+    if (lastActivity < cutoff) stuck.push(batch);
+  }
+
+  if (stuck.length === 0) {
     return NextResponse.json({ swept: 0 });
   }
 
   let swept = 0;
-  for (const batch of stuck as StuckBatch[]) {
+  for (const batch of stuck) {
     const { error: updateError } = await supabase
       .from("outbound_call_batches")
       .update({
@@ -84,7 +113,7 @@ export async function GET(req: NextRequest) {
     await sendAlertEmail(
       `[AIIT Hub] Outbound call batch DID NOT COMPLETE`,
       [
-        `A calling batch was still dialling after ${STUCK_AFTER_MINUTES} minutes, so it was interrupted before it finished.`,
+        `A calling batch has rung nobody for ${NO_PROGRESS_MINUTES} minutes with numbers still waiting, so it was marked interrupted.`,
         ``,
         `Script: ${batch.script_name}`,
         `Agent: ${batch.assistant_name ?? batch.assistant_id}`,
