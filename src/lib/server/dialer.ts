@@ -1,35 +1,71 @@
 /**
  * Outbound campaign dialler.
  *
- * Shared by POST /api/calls/start (dial now) and /api/cron/scheduled-calls
- * (dial at a set time) so both paths behave identically.
+ * Shared by POST /api/calls/start, /api/cron/scheduled-calls and
+ * /api/cron/dial-queue so every path behaves identically.
  *
  * Each call carries a per-call server override pointing at /api/webhooks/vapi.
- * That is deliberate: it means only campaign calls report their outcome here,
- * and the assistant-level serverUrl feeding Ali's existing Make scenarios is
- * left completely alone.
+ * That is deliberate: only campaign calls report their outcome here, and the
+ * assistant-level serverUrl feeding Ali's existing Make scenarios is left alone.
+ *
+ * Dialling is a DRIP, not a burst. VAPI caps concurrent calls per account, and
+ * POST /call returns the instant a call is queued rather than when it ends, so
+ * firing a whole list at once would stack up hundreds of simultaneous calls and
+ * sail straight past that cap. Each pass instead asks VAPI how many calls are
+ * live right now across the WHOLE account and tops up to MAX_CONCURRENT_CALLS.
+ * Counting from VAPI rather than from our own rows is what keeps Ali's inbound
+ * receptionist and any running Make scenario inside the budget too.
+ *
+ * A pass runs when a batch starts and then every minute from
+ * /api/cron/dial-queue, so a long list drains steadily on its own.
  *
  * SERVER-SIDE ONLY.
  */
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '~/lib/supabase/admin';
 import { env } from '~/env';
 import { sendAlertEmail } from '~/lib/server/alerts';
 
 const VAPI_BASE_URL = 'https://api.vapi.ai';
 
-/** Numbers dialled concurrently. VAPI queues each call and returns straight
- *  away, so this is about not hammering the API rather than call pacing. */
-const DIAL_CONCURRENCY = 5;
+/**
+ * Ceiling on calls live at once, across the entire VAPI account.
+ * VAPI's limit is 10; 8 leaves two lines free so Ali's inbound agents and any
+ * running Make scenario are never starved by a campaign.
+ */
+export const MAX_CONCURRENT_CALLS = 8;
 
-/** Per-request ceiling so one hung VAPI request cannot strand the batch. */
-const DIAL_TIMEOUT_MS = 30_000;
+/**
+ * A call dialled longer ago than this with no end-of-call report is assumed
+ * finished, so one lost webhook cannot hold a concurrency slot open forever.
+ */
+const ASSUME_ENDED_AFTER_MINUTES = 30;
+
+/** VAPI call statuses that occupy a concurrency slot. */
+const LIVE_STATUSES = new Set(['queued', 'ringing', 'in-progress', 'forwarding']);
+
+/** Per-request ceiling so one hung VAPI request cannot stall a pass. */
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export const MAX_NUMBERS = 200;
 
 export type Target = { id: string; phone_number: string };
 
+type Admin = SupabaseClient;
+
 /** The assistant's LLM config, as VAPI returns it on GET /assistant/{id}. */
 type VapiModel = Record<string, unknown> & { provider?: string; model?: string; tools?: unknown[] };
+
+type ActiveBatch = {
+  id: string;
+  status: string;
+  script_snapshot: string;
+  first_message: string | null;
+  assistant_id: string;
+  assistant_name: string | null;
+  phone_number_id: string;
+  transfer_number: string | null;
+};
 
 /**
  * Public origin VAPI should post end-of-call reports to. Explicit env var wins;
@@ -61,7 +97,7 @@ export async function buildModelOverride(
 ): Promise<VapiModel> {
   const res = await fetch(`${VAPI_BASE_URL}/assistant/${assistantId}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(DIAL_TIMEOUT_MS),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -114,25 +150,19 @@ async function placeCall(opts: {
   const secret = env.VAPI_WEBHOOK_SECRET;
 
   // Only attach the outcome webhook when we can actually be reached and can
-  // authenticate ourselves. Without both, the call still goes out, it just will
-  // not report back, which the campaign view shows as "awaiting result".
+  // authenticate ourselves. Without both the call still goes out, it just never
+  // reports back, which the campaign view shows as "awaiting result".
   const serverOverride =
     origin && secret
       ? {
-          server: {
-            url: `${origin}/api/webhooks/vapi`,
-            headers: { 'x-vapi-secret': secret },
-          },
+          server: { url: `${origin}/api/webhooks/vapi`, headers: { 'x-vapi-secret': secret } },
           serverMessages: ['end-of-call-report'],
         }
       : {};
 
   const res = await fetch(`${VAPI_BASE_URL}/call`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       assistantId,
       phoneNumberId,
@@ -143,7 +173,7 @@ async function placeCall(opts: {
         ...serverOverride,
       },
     }),
-    signal: AbortSignal.timeout(DIAL_TIMEOUT_MS),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -159,7 +189,7 @@ async function placeCall(opts: {
 function describeError(reason: unknown): string {
   if (reason instanceof Error) {
     if (reason.name === 'TimeoutError' || reason.name === 'AbortError') {
-      return `VAPI did not respond within ${DIAL_TIMEOUT_MS / 1000}s`;
+      return `VAPI did not respond within ${REQUEST_TIMEOUT_MS / 1000}s`;
     }
     return reason.message;
   }
@@ -167,126 +197,176 @@ function describeError(reason: unknown): string {
 }
 
 /**
- * Dials every target in a batch and writes the results back.
- * Placing the call is all this does. Whether anyone picked up arrives later,
- * through /api/webhooks/vapi.
+ * How many calls are live on the VAPI account right now.
+ *
+ * Asks VAPI, not our own tables, so calls started by Ali's inbound agents or by
+ * a Make scenario also count against the budget. Falls back to our own
+ * bookkeeping if VAPI cannot be reached, erring on the side of thinking more
+ * calls are live rather than fewer.
  */
-export async function runBatch(opts: {
-  batchId: string;
-  apiKey: string;
-  assistantId: string;
-  assistantName: string | null;
-  phoneNumberId: string;
-  script: string;
-  firstMessage: string | null;
-  transferNumber: string | null;
-  targets: Target[];
-}) {
-  const {
-    batchId, apiKey, assistantId, assistantName,
-    phoneNumberId, script, firstMessage, transferNumber, targets,
-  } = opts;
-  const supabase = createAdminClient();
+export async function countLiveCalls(apiKey: string, supabase: Admin): Promise<number> {
+  const since = new Date(Date.now() - ASSUME_ENDED_AFTER_MINUTES * 60_000).toISOString();
 
-  await supabase.from('outbound_call_batches').update({ status: 'dialling' }).eq('id', batchId);
-
-  // Resolved once per batch, not per call. If the agent cannot be read, fail the
-  // whole batch here rather than firing the same broken payload at every number.
-  let modelOverride: VapiModel;
   try {
-    modelOverride = await buildModelOverride(apiKey, assistantId, script, transferNumber);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await supabase
-      .from('outbound_call_batches')
-      .update({ status: 'failed', error: msg, completed_at: new Date().toISOString() })
-      .eq('id', batchId);
-    await supabase
-      .from('outbound_calls')
-      .update({ status: 'failed', error: 'Not dialled, the agent could not be prepared' })
-      .eq('batch_id', batchId);
-    await sendAlertEmail(
-      `[AIIT Hub] Outbound call batch FAILED before dialling`,
-      [
-        `A calling batch could not start, so no numbers were dialled.`,
-        ``,
-        `Agent: ${assistantName ?? assistantId}`,
-        `Reason: ${msg}`,
-      ].join('\n'),
+    const res = await fetch(
+      `${VAPI_BASE_URL}/call?limit=100&createdAtGe=${encodeURIComponent(since)}`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
     );
-    return;
+    if (!res.ok) throw new Error(`VAPI returned ${res.status}`);
+    const calls = (await res.json()) as Array<{ status?: string }>;
+    return calls.filter((c) => LIVE_STATUSES.has(c.status ?? '')).length;
+  } catch (err) {
+    console.warn('[dialer] could not read live calls from VAPI, using local count:', describeError(err));
+    const { count } = await supabase
+      .from('outbound_calls')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'dialled')
+      .is('outcome', null)
+      .gte('dialled_at', since);
+    return count ?? 0;
+  }
+}
+
+/** Recomputes a batch's counters from its rows, so they cannot drift. */
+async function refreshCounts(supabase: Admin, batchId: string) {
+  const { data } = await supabase.from('outbound_calls').select('status').eq('batch_id', batchId);
+  const rows = (data ?? []) as Array<{ status: string }>;
+  const dialled = rows.filter((r) => r.status === 'dialled').length;
+  const failed = rows.filter((r) => r.status === 'failed').length;
+  const remaining = rows.filter((r) => r.status === 'queued').length;
+
+  const update: Record<string, unknown> = { dialled_count: dialled, failed_count: failed };
+
+  // Batch status tracks DIALLING, not outcomes. Outcomes keep arriving by
+  // webhook long after the last number has been rung.
+  if (remaining === 0) {
+    update.status = failed === 0 ? 'completed' : dialled === 0 ? 'failed' : 'partial';
+    update.completed_at = new Date().toISOString();
   }
 
-  let dialled = 0;
-  let failed = 0;
-  const errors: string[] = [];
+  await supabase.from('outbound_call_batches').update(update).eq('id', batchId);
+  return remaining;
+}
 
-  for (let i = 0; i < targets.length; i += DIAL_CONCURRENCY) {
-    const slice = targets.slice(i, i + DIAL_CONCURRENCY);
+async function failBatch(supabase: Admin, batch: ActiveBatch, reason: string) {
+  await supabase
+    .from('outbound_call_batches')
+    .update({ status: 'failed', error: reason, completed_at: new Date().toISOString() })
+    .eq('id', batch.id);
+  await supabase
+    .from('outbound_calls')
+    .update({ status: 'failed', error: 'Not dialled, the agent could not be prepared', outcome: 'failed' })
+    .eq('batch_id', batch.id)
+    .eq('status', 'queued');
+  await sendAlertEmail(
+    `[AIIT Hub] Outbound call batch FAILED before dialling`,
+    [
+      `A calling batch could not start, so its remaining numbers were not dialled.`,
+      ``,
+      `Agent: ${batch.assistant_name ?? batch.assistant_id}`,
+      `Reason: ${reason}`,
+    ].join('\n'),
+  );
+}
+
+/**
+ * One dialling pass: top the account up to MAX_CONCURRENT_CALLS and stop.
+ *
+ * Safe to call concurrently with itself. The worst case of two overlapping
+ * passes is that the second sees the first's calls already live and finds no
+ * headroom, which is exactly the behaviour we want.
+ */
+export async function dialPending(apiKey: string): Promise<{ dialled: number; live: number }> {
+  const supabase = createAdminClient();
+
+  const live = await countLiveCalls(apiKey, supabase);
+  let headroom = MAX_CONCURRENT_CALLS - live;
+  if (headroom <= 0) return { dialled: 0, live };
+
+  const { data: batchRows, error } = await supabase
+    .from('outbound_call_batches')
+    .select('id, status, script_snapshot, first_message, assistant_id, assistant_name, phone_number_id, transfer_number')
+    .in('status', ['queued', 'dialling'])
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('[dialer] could not load active batches:', error.message);
+    return { dialled: 0, live };
+  }
+
+  let dialledNow = 0;
+
+  for (const batch of (batchRows ?? []) as ActiveBatch[]) {
+    if (headroom <= 0) break;
+
+    const { data: targetRows } = await supabase
+      .from('outbound_calls')
+      .select('id, phone_number')
+      .eq('batch_id', batch.id)
+      .eq('status', 'queued')
+      .order('created_at', { ascending: true })
+      .limit(headroom);
+
+    const targets = (targetRows ?? []) as Target[];
+
+    // Nothing left to ring: settle the batch and move on.
+    if (targets.length === 0) {
+      await refreshCounts(supabase, batch.id);
+      continue;
+    }
+
+    if (batch.status !== 'dialling') {
+      await supabase.from('outbound_call_batches').update({ status: 'dialling' }).eq('id', batch.id);
+    }
+
+    let modelOverride: VapiModel;
+    try {
+      modelOverride = await buildModelOverride(apiKey, batch.assistant_id, batch.script_snapshot, batch.transfer_number);
+    } catch (err) {
+      await failBatch(supabase, batch, err instanceof Error ? err.message : String(err));
+      continue;
+    }
 
     const results = await Promise.allSettled(
-      slice.map((t) =>
-        placeCall({ apiKey, assistantId, phoneNumberId, modelOverride, firstMessage, number: t.phone_number }),
+      targets.map((t) =>
+        placeCall({
+          apiKey,
+          assistantId: batch.assistant_id,
+          phoneNumberId: batch.phone_number_id,
+          modelOverride,
+          firstMessage: batch.first_message,
+          number: t.phone_number,
+        }),
       ),
     );
 
     await Promise.all(
-      results.map(async (result, n) => {
-        const target = slice[n];
+      results.map(async (result, i) => {
+        const target = targets[i];
         if (!target) return;
 
         if (result.status === 'fulfilled') {
-          dialled++;
+          dialledNow++;
+          headroom--;
           await supabase
             .from('outbound_calls')
-            .update({
-              status: 'dialled',
-              vapi_call_id: result.value,
-              dialled_at: new Date().toISOString(),
-            })
+            .update({ status: 'dialled', vapi_call_id: result.value, dialled_at: new Date().toISOString() })
             .eq('id', target.id);
         } else {
-          failed++;
-          const msg = describeError(result.reason);
-          if (!errors.includes(msg)) errors.push(msg);
+          // A rejected call never occupied a line, so it does not cost headroom.
           await supabase
             .from('outbound_calls')
-            .update({ status: 'failed', error: msg, outcome: 'failed' })
+            .update({ status: 'failed', error: describeError(result.reason), outcome: 'failed' })
             .eq('id', target.id);
         }
       }),
     );
 
-    await supabase
-      .from('outbound_call_batches')
-      .update({ dialled_count: dialled, failed_count: failed })
-      .eq('id', batchId);
+    await refreshCounts(supabase, batch.id);
   }
 
-  const status = failed === 0 ? 'completed' : dialled === 0 ? 'failed' : 'partial';
-
-  await supabase
-    .from('outbound_call_batches')
-    .update({
-      status,
-      dialled_count: dialled,
-      failed_count: failed,
-      error: errors.length > 0 ? errors.join('; ') : null,
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', batchId);
-
-  if (failed > 0) {
-    await sendAlertEmail(
-      `[AIIT Hub] Outbound call batch ${status === 'failed' ? 'FAILED' : 'PARTIALLY FAILED'}`,
-      [
-        `An outbound calling batch from the dashboard did not fully dial.`,
-        ``,
-        `Agent: ${assistantName ?? assistantId}`,
-        `Dialled: ${dialled} / ${targets.length} numbers (${failed} failed)`,
-        ``,
-        `Error from VAPI: ${errors.join('; ') || 'unknown'}`,
-      ].join('\n'),
-    );
-  }
+  return { dialled: dialledNow, live };
 }

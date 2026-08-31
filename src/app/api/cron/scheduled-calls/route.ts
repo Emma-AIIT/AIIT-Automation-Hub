@@ -2,27 +2,22 @@
  * GET /api/cron/scheduled-calls
  * Cron endpoint, called by Vercel Cron (secured with CRON_SECRET bearer token).
  *
- * Fires campaign batches that were parked with a future scheduled_at, so Ali can
- * queue a list at midnight and have it dial at 9am. Batches are claimed by
- * flipping them to "queued" before dialling starts, so an overlapping tick
- * cannot dial the same list twice.
+ * Releases campaign batches parked with a future scheduled_at, so Ali can queue
+ * a list at midnight and have it start dialling at 9am.
+ *
+ * Releasing only flips the batch to "queued". The actual ringing is left to the
+ * shared drip in ~/lib/server/dialer, which respects the concurrency ceiling, so
+ * a scheduled list cannot burst past it either. The status-filtered update is
+ * what stops two overlapping ticks releasing the same batch twice.
  */
 import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { env } from "~/env";
-import { runBatch, type Target } from "~/lib/server/dialer";
+import { dialPending } from "~/lib/server/dialer";
 
 export const maxDuration = 300;
 
-type DueBatch = {
-  id: string;
-  script_snapshot: string;
-  first_message: string | null;
-  assistant_id: string;
-  assistant_name: string | null;
-  phone_number_id: string;
-  transfer_number: string | null;
-};
+type DueBatch = { id: string };
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
@@ -39,7 +34,7 @@ export async function GET(req: NextRequest) {
 
   const { data: due, error } = await supabase
     .from("outbound_call_batches")
-    .select("id, script_snapshot, first_message, assistant_id, assistant_name, phone_number_id, transfer_number")
+    .select("id")
     .eq("status", "scheduled")
     .lte("scheduled_at", new Date().toISOString());
 
@@ -48,13 +43,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (!due || due.length === 0) {
-    return NextResponse.json({ started: 0 });
+    return NextResponse.json({ released: 0 });
   }
 
-  let started = 0;
+  let released = 0;
   for (const batch of due as DueBatch[]) {
-    // Claim it first. The filter on status makes this a no-op if another tick
-    // already took it, which is what stops a list being dialled twice.
+    // The status filter makes this a no-op if another tick already took it.
     const { data: claimed, error: claimError } = await supabase
       .from("outbound_call_batches")
       .update({ status: "queued" })
@@ -63,37 +57,15 @@ export async function GET(req: NextRequest) {
       .select("id");
 
     if (claimError || !claimed || claimed.length === 0) continue;
+    released++;
+  }
 
-    const { data: targets, error: targetsError } = await supabase
-      .from("outbound_calls")
-      .select("id, phone_number")
-      .eq("batch_id", batch.id)
-      .eq("status", "queued");
-
-    if (targetsError || !targets || targets.length === 0) {
-      await supabase
-        .from("outbound_call_batches")
-        .update({ status: "failed", error: "No numbers left to dial", completed_at: new Date().toISOString() })
-        .eq("id", batch.id);
-      continue;
-    }
-
-    started++;
-
-    await runBatch({
-      batchId: batch.id,
-      apiKey,
-      assistantId: batch.assistant_id,
-      assistantName: batch.assistant_name,
-      phoneNumberId: batch.phone_number_id,
-      script: batch.script_snapshot,
-      firstMessage: batch.first_message,
-      transferNumber: batch.transfer_number,
-      targets: targets as Target[],
-    }).catch((err) => {
-      console.error("[cron/scheduled-calls] batch", batch.id, "crashed:", err);
+  // One pass now so a released batch does not wait on the next dial-queue tick.
+  if (released > 0) {
+    await dialPending(apiKey).catch((err) => {
+      console.error("[cron/scheduled-calls] dialling pass failed:", err);
     });
   }
 
-  return NextResponse.json({ started });
+  return NextResponse.json({ released });
 }

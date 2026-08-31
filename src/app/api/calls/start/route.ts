@@ -5,18 +5,22 @@
  * a VAPI assistant, a VAPI phone number to dial from, a list of E.164 numbers,
  * and optionally a time to dial at and a number to warm-transfer to.
  *
- * With no scheduledAt the batch dials immediately: the request writes the batch
- * and one row per number, responds, then dials in the background via after().
- * With a scheduledAt in the future the batch is parked as "scheduled" and
- * /api/cron/scheduled-calls picks it up when due.
+ * With no scheduledAt the batch is queued and a dialling pass runs immediately
+ * in the background. That pass only rings as many numbers as VAPI has spare
+ * lines for; the rest stay queued and /api/cron/dial-queue drains them a minute
+ * at a time. A 200-number list therefore trickles out at MAX_CONCURRENT_CALLS
+ * instead of trying to ring 200 people at once.
  *
- * The dialling itself lives in ~/lib/server/dialer so both paths are identical.
+ * With a scheduledAt in the future the batch is parked as "scheduled" and
+ * /api/cron/scheduled-calls releases it when due.
+ *
+ * The dialling itself lives in ~/lib/server/dialer so every path is identical.
  */
 import type { NextRequest } from "next/server";
 import { NextResponse, after } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { env } from "~/env";
-import { runBatch, MAX_NUMBERS, type Target } from "~/lib/server/dialer";
+import { dialPending, MAX_NUMBERS, MAX_CONCURRENT_CALLS } from "~/lib/server/dialer";
 
 export const maxDuration = 300;
 
@@ -106,7 +110,7 @@ export async function POST(req: NextRequest) {
     const { data: inserted, error: targetsError } = await supabase
       .from("outbound_calls")
       .insert(numbers.map((phone_number) => ({ batch_id: batchId, phone_number })))
-      .select("id, phone_number");
+      .select("id");
 
     if (targetsError || !inserted) {
       await supabase
@@ -123,23 +127,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, batchId, scheduled: numbers.length, scheduledAt });
     }
 
+    // Kick a pass now so a small batch starts ringing straight away. Anything
+    // over the concurrency ceiling stays queued for the dial-queue cron.
     after(() =>
-      runBatch({
-        batchId,
-        apiKey,
-        assistantId,
-        assistantName: body.assistantName ?? null,
-        phoneNumberId,
-        script,
-        firstMessage: body.firstMessage?.trim() || null,
-        transferNumber,
-        targets: inserted as Target[],
-      }).catch((err) => {
+      dialPending(apiKey).catch((err) => {
         console.error("[calls/start] background dialling crashed:", err);
       }),
     );
 
-    return NextResponse.json({ success: true, batchId, queued: numbers.length });
+    return NextResponse.json({
+      success: true,
+      batchId,
+      queued: numbers.length,
+      concurrency: MAX_CONCURRENT_CALLS,
+    });
   } catch (error) {
     console.error("[calls/start] error:", error);
     return NextResponse.json({ error: "Failed to start the calls" }, { status: 500 });
