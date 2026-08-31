@@ -1,15 +1,16 @@
 /**
  * Failure alert emails for WhatsApp automations.
  * Posts to the existing Make.com send-email scenario (MAKE_SEND_EMAIL_WEBHOOK_URL,
- * same one the tickets module uses) addressed to WHATSAPP_ALERT_EMAIL.
+ * same one the tickets module uses). Defaults to WHATSAPP_ALERT_EMAIL; pass
+ * `to` to send somewhere else, as the outbound-call lead summaries do.
  * Best-effort: never throws — a broken alert channel must not break the send path.
  * SERVER-SIDE ONLY.
  */
 import { env } from "~/env";
 
-export async function sendAlertEmail(subject: string, body: string): Promise<void> {
+export async function sendAlertEmail(subject: string, body: string, recipient?: string): Promise<void> {
   const webhookUrl = env.MAKE_SEND_EMAIL_WEBHOOK_URL;
-  const to = env.WHATSAPP_ALERT_EMAIL;
+  const to = recipient ?? env.WHATSAPP_ALERT_EMAIL;
   if (!webhookUrl || !to) {
     console.warn("[alerts] Skipping alert email (MAKE_SEND_EMAIL_WEBHOOK_URL or WHATSAPP_ALERT_EMAIL not set):", subject);
     return;

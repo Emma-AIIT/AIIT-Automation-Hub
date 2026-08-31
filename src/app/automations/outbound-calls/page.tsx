@@ -15,18 +15,26 @@
 import { useState, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '@/trpc/react';
-import { parseNumberList, formatAuNumber } from '@/lib/phone';
+import { parseNumberList, formatAuNumber, normaliseAuNumber } from '@/lib/phone';
 import { ScriptLibrary } from '@/components/modules/outbound-calls/ScriptLibrary';
 import { BatchHistory } from '@/components/modules/outbound-calls/BatchHistory';
 import type { CallScript } from '@/server/api/routers/outboundCalls';
 
 const MAX_NUMBERS = 200;
 
+/** Service lines from Ali's call flow. Free text is still allowed. */
+const CATEGORIES = ['AI Services', 'Web Dev Services', 'IT Services', 'Other'];
+
 export default function OutboundCallsPage() {
   const [scriptId, setScriptId] = useState<string | null>(null);
   const [scriptName, setScriptName] = useState('');
   const [script, setScript] = useState('');
   const [firstMessage, setFirstMessage] = useState('');
+  const [category, setCategory] = useState('');
+  const [smsAnswered, setSmsAnswered] = useState('');
+  const [smsNotAnswered, setSmsNotAnswered] = useState('');
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [transferNumber, setTransferNumber] = useState('');
   const [numbersRaw, setNumbersRaw] = useState('');
   const [assistantId, setAssistantId] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
@@ -65,8 +73,11 @@ export default function OutboundCallsPage() {
   const handleLoadScript = useCallback((s: CallScript) => {
     setScriptId(s.id);
     setScriptName(s.name);
+    setCategory(s.category ?? '');
     setScript(s.script);
     setFirstMessage(s.first_message ?? '');
+    setSmsAnswered(s.sms_answered ?? '');
+    setSmsNotAnswered(s.sms_not_answered ?? '');
   }, []);
 
   const handleDeletedScript = useCallback((id: string) => {
@@ -76,8 +87,11 @@ export default function OutboundCallsPage() {
   const handleNewScript = useCallback(() => {
     setScriptId(null);
     setScriptName('');
+    setCategory('');
     setScript('');
     setFirstMessage('');
+    setSmsAnswered('');
+    setSmsNotAnswered('');
   }, []);
 
   const handleSave = useCallback(() => {
@@ -86,10 +100,13 @@ export default function OutboundCallsPage() {
     saveMutation.mutate({
       id: scriptId ?? undefined,
       name: scriptName.trim(),
+      category: category.trim() || undefined,
       script: script.trim(),
       firstMessage: firstMessage.trim() || undefined,
+      smsAnswered: smsAnswered.trim() || undefined,
+      smsNotAnswered: smsNotAnswered.trim() || undefined,
     });
-  }, [scriptId, scriptName, script, firstMessage, saveMutation]);
+  }, [scriptId, scriptName, category, script, firstMessage, smsAnswered, smsNotAnswered, saveMutation]);
 
   const handleStart = useCallback(async () => {
     setStarting(true);
@@ -107,13 +124,19 @@ export default function OutboundCallsPage() {
           phoneNumberId,
           fromNumber: selectedFrom?.number ?? null,
           numbers: parsed.valid.map((n) => n.e164!),
+          scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          transferNumber: transferNumber.trim() ? normaliseAuNumber(transferNumber).e164 : null,
         }),
       });
 
-      const json = (await res.json()) as { error?: string; queued?: number };
+      const json = (await res.json()) as { error?: string; queued?: number; scheduled?: number };
       if (!res.ok) throw new Error(json.error ?? 'Could not start the calls');
 
-      toast.success(`Calling ${json.queued} number${json.queued === 1 ? '' : 's'}`);
+      if (json.scheduled) {
+        toast.success(`Scheduled ${json.scheduled} call${json.scheduled === 1 ? '' : 's'}`);
+      } else {
+        toast.success(`Calling ${json.queued} number${json.queued === 1 ? '' : 's'}`);
+      }
       setNumbersRaw('');
       setConfirming(false);
       setHistoryBump((n) => n + 1);
@@ -122,7 +145,7 @@ export default function OutboundCallsPage() {
     } finally {
       setStarting(false);
     }
-  }, [scriptId, scriptName, script, firstMessage, assistantId, phoneNumberId, selectedAssistant, selectedFrom, parsed]);
+  }, [scriptId, scriptName, script, firstMessage, assistantId, phoneNumberId, selectedAssistant, selectedFrom, parsed, scheduledAt, transferNumber]);
 
   const inputClass =
     'w-full px-3 py-2 text-sm rounded-lg border border-(--color-border-default) bg-white text-(--color-text-primary) placeholder:text-(--color-text-faint) focus:outline-none focus:border-(--color-border-strong)';
@@ -164,17 +187,35 @@ export default function OutboundCallsPage() {
             </div>
 
             <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-(--color-text-secondary) mb-1.5">
-                  Script name
-                </label>
-                <input
-                  type="text"
-                  value={scriptName}
-                  onChange={(e) => setScriptName(e.target.value)}
-                  placeholder="e.g. Lead follow-up, September"
-                  className={inputClass}
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-(--color-text-secondary) mb-1.5">
+                    Script name
+                  </label>
+                  <input
+                    type="text"
+                    value={scriptName}
+                    onChange={(e) => setScriptName(e.target.value)}
+                    placeholder="e.g. Lead follow-up, September"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-(--color-text-secondary) mb-1.5">
+                    Service line
+                  </label>
+                  <input
+                    type="text"
+                    list="call-script-categories"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    placeholder="AI Services"
+                    className={inputClass}
+                  />
+                  <datalist id="call-script-categories">
+                    {CATEGORIES.map((c) => <option key={c} value={c} />)}
+                  </datalist>
+                </div>
               </div>
 
               <div>
@@ -206,7 +247,44 @@ export default function OutboundCallsPage() {
                   }
                   className={`${inputClass} resize-y font-mono text-[13px] leading-relaxed`}
                 />
-                <div className="flex items-center justify-between mt-2">
+              </div>
+
+              {/* Follow-up SMS. Sent automatically once the call ends, which is
+                  why they live with the script rather than with the number list. */}
+              <div className="pt-1 border-t border-(--color-border-subtle) space-y-3">
+                <p className="text-xs font-medium text-(--color-text-secondary) pt-3">Follow-up SMS</p>
+
+                <div>
+                  <label className="block text-[11px] text-(--color-text-muted) mb-1.5">
+                    If they pick up
+                  </label>
+                  <textarea
+                    value={smsAnswered}
+                    onChange={(e) => setSmsAnswered(e.target.value)}
+                    rows={2}
+                    placeholder="Thanks for speaking with us just now. Ali will follow up shortly. Reply STOP to opt out."
+                    className={`${inputClass} resize-y text-[13px]`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-(--color-text-muted) mb-1.5">
+                    If they miss the call
+                  </label>
+                  <textarea
+                    value={smsNotAnswered}
+                    onChange={(e) => setSmsNotAnswered(e.target.value)}
+                    rows={2}
+                    placeholder="We just tried to reach you from All In IT Solutions. Call back any time, or reply here. Reply STOP to opt out."
+                    className={`${inputClass} resize-y text-[13px]`}
+                  />
+                </div>
+
+                <p className="text-[10px] text-(--color-text-faint)">
+                  Leave blank to use the default wording. A copy of every outcome is texted to the ops number either way.
+                </p>
+
+                <div className="flex items-center justify-between">
                   <span className="text-[11px] text-(--color-text-faint)">{script.length} characters</span>
                   <button
                     onClick={handleSave}
@@ -320,12 +398,49 @@ export default function OutboundCallsPage() {
               )}
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1 border-t border-(--color-border-subtle)">
+              <div className="pt-4">
+                <label className="block text-xs font-medium text-(--color-text-secondary) mb-1.5">
+                  Send at <span className="text-(--color-text-faint) font-normal">(optional)</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                  className={inputClass}
+                />
+                <p className="text-[10px] text-(--color-text-faint) mt-1">
+                  Leave blank to dial now.
+                </p>
+              </div>
+
+              <div className="sm:pt-4">
+                <label className="block text-xs font-medium text-(--color-text-secondary) mb-1.5">
+                  Transfer to <span className="text-(--color-text-faint) font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={transferNumber}
+                  onChange={(e) => setTransferNumber(e.target.value)}
+                  placeholder="0414 441 371"
+                  className={inputClass}
+                />
+                <p className="text-[10px] text-(--color-text-faint) mt-1">
+                  The agent can put a warm lead straight through to this number.
+                </p>
+              </div>
+            </div>
+
             <button
               onClick={() => setConfirming(true)}
               disabled={!canStart}
               className="w-full py-2.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
-              {starting ? 'Starting...' : `Call ${parsed.valid.length || ''} ${parsed.valid.length === 1 ? 'person' : 'people'}`.trim()}
+              {starting
+                ? 'Starting...'
+                : scheduledAt
+                  ? `Schedule ${parsed.valid.length || ''} ${parsed.valid.length === 1 ? 'call' : 'calls'}`.replace(/\s+/g, ' ').trim()
+                  : `Call ${parsed.valid.length || ''} ${parsed.valid.length === 1 ? 'person' : 'people'}`.replace(/\s+/g, ' ').trim()}
             </button>
           </div>
         </div>
@@ -343,8 +458,18 @@ export default function OutboundCallsPage() {
 
             <div className="p-5 space-y-3">
               <p className="text-sm text-(--color-text-secondary)">
-                This will place <strong>{parsed.valid.length}</strong> real phone call
-                {parsed.valid.length === 1 ? '' : 's'} straight away.
+                {scheduledAt ? (
+                  <>
+                    This will place <strong>{parsed.valid.length}</strong> real phone call
+                    {parsed.valid.length === 1 ? '' : 's'} at{' '}
+                    <strong>{new Date(scheduledAt).toLocaleString('en-AU')}</strong>.
+                  </>
+                ) : (
+                  <>
+                    This will place <strong>{parsed.valid.length}</strong> real phone call
+                    {parsed.valid.length === 1 ? '' : 's'} straight away.
+                  </>
+                )}
               </p>
 
               <dl className="text-xs space-y-1.5 p-3 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle)">
@@ -356,6 +481,12 @@ export default function OutboundCallsPage() {
                   <dt className="text-(--color-text-muted)">Calling from</dt>
                   <dd className="text-(--color-text-primary) font-medium text-right">{selectedFrom?.name}</dd>
                 </div>
+                {transferNumber.trim() && (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-(--color-text-muted)">Can transfer to</dt>
+                    <dd className="text-(--color-text-primary) font-medium text-right">{transferNumber}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between gap-3">
                   <dt className="text-(--color-text-muted)">Script</dt>
                   <dd className="text-(--color-text-primary) font-medium text-right truncate">
@@ -393,7 +524,7 @@ export default function OutboundCallsPage() {
                 disabled={starting}
                 className="px-3 py-2 text-sm font-medium rounded-lg bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition"
               >
-                {starting ? 'Starting...' : 'Yes, start calling'}
+                {starting ? 'Starting...' : scheduledAt ? 'Yes, schedule them' : 'Yes, start calling'}
               </button>
             </div>
           </div>

@@ -9,12 +9,13 @@
 import { useState, useEffect } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
-import { formatAuNumber } from '@/lib/phone';
+import { CampaignDetail } from './CampaignDetail';
 import type { CallBatch } from '@/server/api/routers/outboundCalls';
 
 const SYDNEY_TZ = 'Australia/Sydney';
 
 const STATUS_STYLES: Record<CallBatch['status'], { dot: string; label: string; badge: string }> = {
+  scheduled:   { dot: 'bg-violet-400',             label: 'Scheduled',   badge: 'bg-violet-50 text-violet-600 border-violet-200' },
   queued:      { dot: 'bg-sky-400 animate-pulse',  label: 'Queued',      badge: 'bg-sky-50 text-sky-600 border-sky-200' },
   dialling:    { dot: 'bg-sky-500 animate-pulse',  label: 'Dialling...', badge: 'bg-sky-50 text-sky-700 border-sky-200' },
   completed:   { dot: 'bg-[#25D366]',              label: 'Completed',   badge: 'bg-[#25D366]/8 text-[#1a9e4e] border-[#25D366]/20' },
@@ -26,31 +27,6 @@ const STATUS_STYLES: Record<CallBatch['status'], { dot: string; label: string; b
 };
 
 const ACTIVE: CallBatch['status'][] = ['queued', 'dialling'];
-
-function BatchDetail({ batchId }: { batchId: string }) {
-  const { data: calls = [], isLoading } = api.outboundCalls.listBatchCalls.useQuery({ batchId });
-
-  if (isLoading) return <p className="text-xs text-(--color-text-muted)">Loading numbers...</p>;
-
-  return (
-    <ul className="space-y-1">
-      {calls.map((c) => (
-        <li key={c.id} className="flex items-center gap-2 text-xs">
-          <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-              c.status === 'dialled' ? 'bg-[#25D366]' : c.status === 'failed' ? 'bg-red-400' : 'bg-sky-400'
-            }`}
-          />
-          <span className="font-mono text-(--color-text-primary)">{formatAuNumber(c.phone_number)}</span>
-          <span className="text-(--color-text-faint)">
-            {c.status === 'dialled' ? 'called' : c.status === 'failed' ? 'not called' : 'waiting'}
-          </span>
-          {c.error && <span className="text-red-500 truncate">{c.error}</span>}
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export function BatchHistory({ refreshBump }: { refreshBump?: number }) {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -122,7 +98,7 @@ export function BatchHistory({ refreshBump }: { refreshBump?: number }) {
                         onClick={() => setExpanded(isOpen ? null : b.id)}
                         className="text-xs text-(--color-text-faint) hover:text-(--color-text-muted) hover:underline transition"
                       >
-                        {isOpen ? 'hide numbers' : `${b.total_count} numbers`}
+                        {isOpen ? 'hide results' : `${b.total_count} numbers`}
                       </button>
                     </div>
 
@@ -134,7 +110,7 @@ export function BatchHistory({ refreshBump }: { refreshBump?: number }) {
 
                     {isOpen && (
                       <div className="mt-2 p-2.5 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle)">
-                        <BatchDetail batchId={b.id} />
+                        <CampaignDetail batchId={b.id} />
                       </div>
                     )}
                   </div>
