@@ -14,7 +14,7 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { env } from "~/env";
-import type { VapiCall, VapiAssistant } from "@/types/vapi";
+import type { VapiCall, VapiAssistant, VapiPhoneNumber } from "@/types/vapi";
 import { getEffectiveCallStatus } from "@/lib/vapi-call-status";
 
 const VAPI_BASE_URL = "https://api.vapi.ai";
@@ -93,6 +93,17 @@ export const vapiRouter = createTRPCRouter({
 
       return { metrics, totalCalls, totalCost };
     }),
+
+  // The VAPI numbers calls can be placed FROM. The Outbound Calls page needs the
+  // phoneNumberId (not the digits) because that is what POST /call expects.
+  getPhoneNumbers: publicProcedure.query(async () => {
+    const numbers = await vapiRequest<VapiPhoneNumber[]>('/phone-number');
+    return numbers.map((n) => ({
+      id: n.id,
+      number: n.number ?? '',
+      name: n.name ?? n.number ?? n.id,
+    }));
+  }),
 
   getAssistants: publicProcedure.query(async () => {
     const assistants = await vapiRequest<VapiAssistant[]>('/assistant');
