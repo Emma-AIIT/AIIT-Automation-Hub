@@ -78,6 +78,11 @@ export default function OutboundCallsPage() {
     setFirstMessage(s.first_message ?? '');
     setSmsAnswered(s.sms_answered ?? '');
     setSmsNotAnswered(s.sms_not_answered ?? '');
+    // Restore the whole setup, not just the words. Only overwrite the dropdowns
+    // when the script actually carries a choice, so loading an older script
+    // does not wipe what is already selected.
+    if (s.assistant_id) setAssistantId(s.assistant_id);
+    if (s.phone_number_id) setPhoneNumberId(s.phone_number_id);
   }, []);
 
   const handleDeletedScript = useCallback((id: string) => {
@@ -105,8 +110,10 @@ export default function OutboundCallsPage() {
       firstMessage: firstMessage.trim() || undefined,
       smsAnswered: smsAnswered.trim() || undefined,
       smsNotAnswered: smsNotAnswered.trim() || undefined,
+      assistantId: assistantId || undefined,
+      phoneNumberId: phoneNumberId || undefined,
     });
-  }, [scriptId, scriptName, category, script, firstMessage, smsAnswered, smsNotAnswered, saveMutation]);
+  }, [scriptId, scriptName, category, script, firstMessage, smsAnswered, smsNotAnswered, assistantId, phoneNumberId, saveMutation]);
 
   const handleStart = useCallback(async () => {
     setStarting(true);
@@ -282,6 +289,11 @@ export default function OutboundCallsPage() {
 
                 <p className="text-[10px] text-(--color-text-faint)">
                   Leave blank to use the default wording. A copy of every outcome is texted to the ops number either way.
+                </p>
+
+                <p className="text-[10px] text-(--color-text-faint)">
+                  Saving also stores the agent and outgoing number selected on the right, so loading this
+                  script sets the whole campaign back up.
                 </p>
 
                 <div className="flex items-center justify-between">

@@ -22,6 +22,8 @@ export interface CallScript {
   first_message: string | null;
   sms_answered: string | null;
   sms_not_answered: string | null;
+  assistant_id: string | null;
+  phone_number_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -120,6 +122,8 @@ export const outboundCallsRouter = createTRPCRouter({
         firstMessage: z.string().max(1000).optional(),
         smsAnswered: z.string().max(1000).optional(),
         smsNotAnswered: z.string().max(1000).optional(),
+        assistantId: z.string().max(200).optional(),
+        phoneNumberId: z.string().max(200).optional(),
       }),
     )
     .mutation(async ({ input }): Promise<CallScript> => {
@@ -131,6 +135,8 @@ export const outboundCallsRouter = createTRPCRouter({
         first_message: input.firstMessage?.trim() ?? null,
         sms_answered: input.smsAnswered?.trim() || null,
         sms_not_answered: input.smsNotAnswered?.trim() || null,
+        assistant_id: input.assistantId?.trim() || null,
+        phone_number_id: input.phoneNumberId?.trim() || null,
         updated_at: new Date().toISOString(),
       };
 
