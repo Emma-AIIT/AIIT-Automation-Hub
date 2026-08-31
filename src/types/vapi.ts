@@ -19,6 +19,13 @@ export interface VapiAssistant {
   updatedAt: string;
 }
 
+export interface VapiPhoneNumber {
+  id: string;
+  number?: string;
+  name?: string;
+  provider?: string;
+}
+
 export interface VapiCall {
   id: string;
   orgId: string;

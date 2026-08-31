@@ -329,6 +329,12 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     icon: "phone",
   },
   {
+    id: "outbound-calls",
+    label: "Outbound Calls",
+    route: "/automations/outbound-calls",
+    icon: "phone",
+  },
+  {
     id: "contacts",
     label: "Contacts",
     route: "/automations/contacts",
