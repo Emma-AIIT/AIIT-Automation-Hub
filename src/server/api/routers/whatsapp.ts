@@ -24,6 +24,7 @@ import { createAdminClient } from "~/lib/supabase/admin";
 import { WHATSAPP_ACCOUNTS, getWebhookUrl } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
+import { cancelBroadcast as cancelBroadcastQueue } from "~/lib/server/whatsapp-broadcast";
 
 const accountIdSchema = z.enum(
   WHATSAPP_ACCOUNTS.map((a) => a.id) as [WhatsAppAccountId, ...WhatsAppAccountId[]]
@@ -53,12 +54,23 @@ export interface BroadcastLogEntry {
   group_names: string[];
   has_file: boolean;
   file_name: string | null;
-  status: "queued" | "sending" | "sent" | "failed" | "partial" | "not_sent";
+  status: "queued" | "sending" | "sent" | "failed" | "partial" | "not_sent" | "cancelled";
   make_error: string | null;
   sent_count: number;
   failed_count: number;
   sent_at: string;
   created_at: string;
+  /** Minutes between groups. Null on rows predating paced sending, which went out
+   *  in one burst. */
+  interval_minutes: number | null;
+  /** When the broadcast was accepted. sent_at is the finish time, which is not
+   *  meaningful until the last group has gone. */
+  queued_at: string | null;
+  /** Derived, not a column: when the next group is due. Null once nothing is left
+   *  in the queue. */
+  next_send_at: string | null;
+  /** Derived: groups still waiting to be sent. */
+  pending_count: number;
 }
 
 export interface ParticipantMessageLogEntry {
@@ -276,11 +288,65 @@ export const whatsappRouter = createTRPCRouter({
       const { data, error } = await supabase
         .from("whatsapp_broadcast_log")
         .select("*")
+        // queued_at is when the broadcast was accepted; sent_at only becomes the
+        // finish time once the last group has gone, so ordering on it alone would
+        // shuffle in-flight broadcasts around as they progress. Backfilled by the
+        // pacing migration, with sent_at as the fallback for older rows.
+        .order("queued_at", { ascending: false, nullsFirst: false })
         .eq("account_id", input.accountId)
         .order("sent_at", { ascending: false })
         .limit(50);
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
-      return (data ?? []) as BroadcastLogEntry[];
+
+      const rows = (data ?? []) as BroadcastLogEntry[];
+
+      // Attach live queue progress to anything still in flight. One extra query for
+      // the whole page rather than one per row.
+      const active = rows.filter((r) => r.status === "queued" || r.status === "sending");
+      if (active.length === 0) {
+        return rows.map((r) => ({ ...r, next_send_at: null, pending_count: 0 }));
+      }
+
+      const { data: pending } = await supabase
+        .from("whatsapp_broadcast_queue")
+        .select("broadcast_id, send_after")
+        .in(
+          "broadcast_id",
+          active.map((r) => r.id),
+        )
+        .eq("status", "pending")
+        .order("send_after", { ascending: true });
+
+      const progress = new Map<string, { next: string; count: number }>();
+      for (const row of (pending ?? []) as { broadcast_id: string; send_after: string }[]) {
+        const seen = progress.get(row.broadcast_id);
+        if (seen) seen.count++;
+        else progress.set(row.broadcast_id, { next: row.send_after, count: 1 });
+      }
+
+      return rows.map((r) => {
+        const p = progress.get(r.id);
+        return { ...r, next_send_at: p?.next ?? null, pending_count: p?.count ?? 0 };
+      });
+    }),
+
+  /**
+   * Stops the groups a broadcast has not reached yet. A paced broadcast can run for
+   * hours, so a wrong message or a wrong group list has to be stoppable - without
+   * this the only recourse was waiting it out. Groups already sent stay sent.
+   */
+  cancelBroadcast: publicProcedure
+    .input(z.object({ broadcastId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      try {
+        return await cancelBroadcastQueue(supabase, input.broadcastId);
+      } catch (err) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err instanceof Error ? err.message : "Could not cancel the broadcast",
+        });
+      }
     }),
 
   // Log an individual (1:1) message batch after it completes. Written by the app itself

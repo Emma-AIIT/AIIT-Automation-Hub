@@ -156,10 +156,12 @@ export default function WhatsAppBroadcastPage() {
       if (image) formData.append('file', image, image.name);
 
       const res = await fetch('/api/whatsapp/broadcast', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(json.error ?? 'Failed to queue broadcast');
-      }
+      const json = await res.json().catch(() => ({})) as {
+        error?: string;
+        intervalMinutes?: number;
+        estimatedMinutes?: number;
+      };
+      if (!res.ok) throw new Error(json.error ?? 'Failed to queue broadcast');
 
       // Accepted — clear the composer so the next broadcast can be queued right away
       setMessage('');
@@ -169,9 +171,21 @@ export default function WhatsAppBroadcastPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
       setBroadcastHistoryBump((n) => n + 1);
 
+      // Groups go out one at a time, spaced apart, so the useful thing to say is
+      // how long the whole run takes — not that it has "sent".
+      const interval = json.intervalMinutes ?? 15;
+      const total = json.estimatedMinutes ?? (ids.length - 1) * interval;
+      const duration =
+        total < 60
+          ? `about ${total} min`
+          : `about ${Math.round((total / 60) * 10) / 10} hours`.replace('.0 ', ' ');
+
       toast.success(
-        `Queued for ${ids.length} group${ids.length !== 1 ? 's' : ''} — sending in background. Safe to close this tab.`,
-        { duration: 7000 },
+        ids.length === 1
+          ? 'Queued — sending now. Safe to close this tab.'
+          : `Queued for ${ids.length} groups — one every ${interval} min, ${duration} in total. ` +
+            `Safe to close this tab; track it in Broadcast History.`,
+        { duration: 9000 },
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to queue broadcast', { duration: 7000 });

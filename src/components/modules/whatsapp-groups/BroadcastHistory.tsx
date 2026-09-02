@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
+import toast from 'react-hot-toast';
 import { api } from '@/trpc/react';
 import type { BroadcastLogEntry } from '@/server/api/routers/whatsapp';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
@@ -26,7 +27,19 @@ const STATUS_STYLES: Record<BroadcastLogEntry['status'], { dot: string; label: s
   // Swept by /api/cron/whatsapp: the send was cut off before it finished, so
   // delivery is unknown. Deliberately not red: this is not a Make.com rejection.
   not_sent: { dot: 'bg-slate-400', label: 'Not sent', badge: 'bg-slate-100 text-slate-600 border-slate-300' },
+  // Stopped from this page part way through. Groups already reached stay sent.
+  cancelled: { dot: 'bg-slate-400', label: 'Cancelled', badge: 'bg-slate-100 text-slate-600 border-slate-300' },
 };
+
+/** "in 12 min" / "in 2 h 15 min" - how long until the next group goes out. */
+function formatCountdown(iso: string): string {
+  const minutes = Math.round((new Date(iso).getTime() - Date.now()) / 60_000);
+  if (minutes <= 0) return 'any moment';
+  if (minutes < 60) return `in ${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `in ${h} h` : `in ${h} h ${m} min`;
+}
 
 const ACTIVE_STATUSES: BroadcastLogEntry['status'][] = ['queued', 'sending'];
 
@@ -48,6 +61,20 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
 
   const hasActive = history.some((e) => ACTIVE_STATUSES.includes(e.status));
   if (hasActive !== pollFast) setPollFast(hasActive);
+
+  // Stopping the groups a broadcast has not reached yet. Paced sends run for hours,
+  // so a wrong message needs an exit that is not "wait it out".
+  const cancelMutation = api.whatsapp.cancelBroadcast.useMutation({
+    onSuccess: (res) => {
+      toast.success(
+        res.cancelled === 0
+          ? 'Nothing left to stop — every group had already been sent'
+          : `Stopped — ${res.cancelled} group${res.cancelled === 1 ? '' : 's'} will not be sent`,
+      );
+      void refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   // Refetch when parent signals a new broadcast was just queued
   useEffect(() => {
@@ -125,6 +152,7 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
         <div className="divide-y divide-(--color-border-subtle)">
           {history.map((entry) => {
             const style = STATUS_STYLES[entry.status];
+            const isActive = ACTIVE_STATUSES.includes(entry.status);
             const hasError = !!entry.make_error;
             const isErrorExpanded = expandedErrors.has(entry.id);
             const isGroupsExpanded = expandedGroups.has(entry.id);
@@ -188,8 +216,45 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
                       </span>
                       <span className="text-xs text-(--color-text-faint)">·</span>
                       <span className="text-xs text-(--color-text-muted)">
-                        {formatSydneyTime(entry.sent_at)}
+                        {formatSydneyTime(entry.queued_at ?? entry.sent_at)}
                       </span>
+
+                      {/* Live pacing progress. Groups go out one at a time, so a
+                          broadcast sits here for hours and needs to show where it
+                          is up to rather than just "Sending…". */}
+                      {isActive && (
+                        <>
+                          <span className="text-xs text-(--color-text-faint)">·</span>
+                          <span className="text-xs text-(--color-text-muted)">
+                            {entry.sent_count} of {entry.group_ids.length} sent
+                          </span>
+                          {entry.next_send_at && (
+                            <>
+                              <span className="text-xs text-(--color-text-faint)">·</span>
+                              <span className="text-xs text-(--color-text-muted)">
+                                next {formatCountdown(entry.next_send_at)}
+                              </span>
+                            </>
+                          )}
+                          <span className="text-xs text-(--color-text-faint)">·</span>
+                          <button
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Stop this broadcast? ${entry.pending_count} group${entry.pending_count === 1 ? '' : 's'} will not receive it. ` +
+                                    `The ${entry.sent_count} already sent cannot be unsent.`,
+                                )
+                              ) {
+                                cancelMutation.mutate({ broadcastId: entry.id });
+                              }
+                            }}
+                            disabled={cancelMutation.isPending}
+                            className="text-xs text-red-500 hover:text-red-600 hover:underline transition disabled:opacity-40"
+                          >
+                            Stop
+                          </button>
+                        </>
+                      )}
 
                       {/* Sent/failed counts (for partial) */}
                       {entry.status === 'partial' && (

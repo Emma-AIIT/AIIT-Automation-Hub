@@ -47,6 +47,55 @@
 
 ## 📝 Changelog Entries
 
+### 2026-09-02 - WhatsApp broadcasts paced again
+
+**Fixed**:
+- Broadcasts sent every group at once instead of one every 15 minutes. The
+  spacing was never in this codebase: the old client loop awaited a Make.com
+  scenario that slept 15 minutes before replying, so the gap was a side effect of
+  a blocked fetch. When the send moved server-side (61099fb) the fan-out became
+  `Promise.allSettled` in batches of `SEND_CONCURRENCY = 8`, and the accidental
+  pacing disappeared with it. Symptom: 11 Make.com executions all stamped
+  11:34:31/11:35:31, one batch of 8 and one of 3, 60s apart - the batch size and
+  `SEND_TIMEOUT_MS` written straight into the execution history.
+- Broadcasts reported "Make.com did not respond within 60s" and were marked
+  Failed even though every message was delivered. The scenario held the
+  connection open for its full 15 minute sleep; the app called that a timeout.
+- Scheduled sends had the same burst bug - `/api/cron/whatsapp` fanned out with an
+  uncapped `Promise.allSettled` over every group. They now go through the queue.
+- The orphan sweeper marked any broadcast in flight over 10 minutes as
+  "not_sent". Every paced broadcast trips that by design, so it now skips
+  anything the queue owns.
+
+**Added**:
+- `src/lib/server/whatsapp-broadcast.ts` - the queue: `enqueueBroadcast`,
+  `drainBroadcastQueue`, `cancelBroadcast`. Pacing is enforced both by each row's
+  `send_after` and by a check against the account's last real send, so two
+  broadcasts queued on one number interleave instead of doubling the rate.
+- `whatsapp_broadcast_queue` table (one row per group) and the
+  `whatsapp-broadcasts` storage bucket, via
+  `supabase/migrations/20260902000000_whatsapp_broadcast_pacing.sql`.
+- Broadcast images are staged in storage rather than held in function memory -
+  the last group of a long broadcast is sent hours later by a different
+  invocation. Deleted when the broadcast settles.
+- "Stop" button and live progress ("4 of 11 sent · next in 12 min") in Broadcast
+  History. A paced broadcast runs for hours, so a wrong message needed an exit.
+- `WHATSAPP_BROADCAST_INTERVAL_MINUTES` (optional, defaults to 15).
+- 200 group cap per broadcast, with an error naming the run time. The Aug 26
+  attempt at 568 groups would take 142 days at this interval.
+
+**Changed**:
+- `/api/whatsapp/broadcast` only enqueues now; nothing is sent in the request.
+- `/api/cron/whatsapp` drains the queue on every tick (already ran every minute).
+
+**Make.com — REQUIRED**:
+- The send scenario's three `util:FunctionSleep` modules (300s each) MUST be
+  removed. Pacing lives in the app now; leaving them stacks a second 15 minute
+  delay on every group and re-creates the false timeout failures. A stripped
+  blueprint was exported alongside the original.
+
+---
+
 ### 2026-02-09 - Initial Project Setup
 
 **Added**:
