@@ -44,12 +44,12 @@ export const BROADCAST_INTERVAL_MINUTES = (() => {
  *  sleeping and needs its Sleep modules removed. */
 const SEND_TIMEOUT_MS = 60_000;
 
-/** A row left "sending" this long lost its cron invocation mid-flight. Returned to
- *  the queue rather than failed, because the tick that owned it may never have
- *  reached Make.com at all. */
+/** A row left "sending" this long lost its cron invocation mid-flight. It is failed
+ *  rather than retried: the dead invocation may already have reached Make.com. */
 const CLAIM_STALE_MINUTES = 5;
 
-/** Retries per group before it is given up on. */
+/** Retries per group, for errors that prove nothing was sent. Timeouts are never
+ *  retried - see the catch block in drainBroadcastQueue. */
 const MAX_ATTEMPTS = 3;
 
 export type BroadcastQueueRow = {
@@ -106,13 +106,21 @@ export async function sendToGroup(opts: {
   }
 }
 
+/** True when the send timed out, i.e. we never learned whether it went through. */
+export function isTimeout(reason: unknown): boolean {
+  return (
+    reason instanceof Error && (reason.name === "TimeoutError" || reason.name === "AbortError")
+  );
+}
+
 export function describeSendError(reason: unknown): string {
   if (reason instanceof Error) {
-    if (reason.name === "TimeoutError" || reason.name === "AbortError") {
+    if (isTimeout(reason)) {
       return (
-        `Make.com did not respond within ${SEND_TIMEOUT_MS / 1000}s. ` +
-        `The message may still have been delivered - if this happens on every group, ` +
-        `the scenario still has its Sleep modules and they need to be removed.`
+        `Make.com did not respond within ${SEND_TIMEOUT_MS / 1000}s, so it is unknown ` +
+        `whether this group received the message. It was NOT re-sent, to avoid ` +
+        `sending twice - check the group before sending again. ` +
+        `If every group does this, the scenario still has its Sleep modules.`
       );
     }
     return reason.message;
@@ -227,15 +235,29 @@ async function refreshBroadcast(supabase: SupabaseAdmin, broadcastId: string): P
   }
 }
 
-/** Returns rows stuck in "sending" to the queue so a lost tick does not drop a group. */
-async function releaseStaleClaims(supabase: SupabaseAdmin): Promise<void> {
+/**
+ * Settles rows abandoned mid-send by a dead cron invocation.
+ *
+ * These are marked failed, NOT returned to the queue. The invocation may have
+ * reached Make.com before it died, and nothing here can tell the difference - so
+ * re-queueing would sometimes send the group twice. A group that silently goes out
+ * twice is worse than one that visibly does not go out: the second is on the
+ * dashboard for someone to re-send, the first is only visible to the recipient.
+ */
+async function settleStaleClaims(supabase: SupabaseAdmin): Promise<void> {
   const cutoff = new Date(Date.now() - CLAIM_STALE_MINUTES * 60_000).toISOString();
   const { error } = await supabase
     .from("whatsapp_broadcast_queue")
-    .update({ status: "pending" })
+    .update({
+      status: "failed",
+      error:
+        "The send was interrupted, so it is unknown whether this group received the " +
+        "message. It was not re-sent - check the group before sending again.",
+      sent_at: new Date().toISOString(),
+    })
     .eq("status", "sending")
     .lt("send_after", cutoff);
-  if (error) console.warn("[whatsapp-broadcast] stale claim release failed:", error.message);
+  if (error) console.warn("[whatsapp-broadcast] stale claim settle failed:", error.message);
 }
 
 /**
@@ -248,7 +270,7 @@ async function releaseStaleClaims(supabase: SupabaseAdmin): Promise<void> {
  * Returns how many groups actually went out this tick.
  */
 export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<number> {
-  await releaseStaleClaims(supabase);
+  await settleStaleClaims(supabase);
 
   const nowIso = new Date().toISOString();
 
@@ -343,25 +365,33 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<numb
     } catch (err) {
       const message = describeSendError(err);
       const attempts = row.attempts + 1;
-      const giveUp = attempts >= MAX_ATTEMPTS;
+
+      // A timeout is NOT a failed send - it is an unknown one. Make.com may have
+      // taken the message and be forwarding it to Green API right now. Retrying
+      // that duplicates it: on 2026-09-02 a two group test produced four sends
+      // this way, because the scenario still slept 15 minutes and every send
+      // "timed out" at 60s while being delivered. Only errors that mean nothing
+      // was processed - a refused connection, an HTTP error from Make - are
+      // retried. Silence is left alone for a human to check.
+      const retryable = !isTimeout(err) && attempts < MAX_ATTEMPTS;
 
       await supabase
         .from("whatsapp_broadcast_queue")
         .update(
-          giveUp
-            ? { status: "failed", error: message, sent_at: new Date().toISOString() }
-            : {
+          retryable
+            ? {
                 status: "pending",
                 error: message,
                 // Retry on the next interval rather than the next tick: a burst of
                 // retries is exactly the traffic pattern being avoided.
                 send_after: new Date(Date.now() + intervalMs()).toISOString(),
-              },
+              }
+            : { status: "failed", error: message, sent_at: new Date().toISOString() },
         )
         .eq("id", row.id);
 
       console.error(
-        `[whatsapp-broadcast] group ${row.chat_id} attempt ${attempts}${giveUp ? " (final)" : ""}: ${message}`,
+        `[whatsapp-broadcast] group ${row.chat_id} attempt ${attempts}${retryable ? "" : " (final)"}: ${message}`,
       );
     }
 
