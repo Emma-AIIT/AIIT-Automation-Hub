@@ -1,29 +1,32 @@
 /**
  * GET /api/cron/whatsapp
- * Cron endpoint - called by Vercel Cron (secured with CRON_SECRET bearer token).
+ * Cron endpoint - called by Vercel Cron every minute (secured with CRON_SECRET).
  *
- * Two jobs run on every tick:
- *  1. Scheduled sends. Fetches all pending scheduled_messages whose scheduled_at
- *     time has passed, then fans out each message to its target group IDs via the
- *     account-specific Make.com send-message webhook (resolved from the row's
- *     account_id). Updates each row to "sent" or "failed".
- *  2. Orphan sweep. A dashboard broadcast is fanned out in the background by
- *     /api/whatsapp/broadcast. If that function is cut short (execution ceiling,
- *     a deploy mid-send) nothing else ever writes the row a terminal status, so it
- *     showed "Sending..." forever. Any row still queued/sending past the cutoff is
- *     marked "not_sent" and alerted on. The sweep only relabels: it never re-sends,
- *     because some groups may already have received the message.
+ * Three jobs run on every tick:
+ *  1. Broadcast pacing. drainBroadcastQueue() releases at most one group per
+ *     WhatsApp account, and only if that account's last send was a full interval
+ *     ago. This is what puts 15 minutes between groups; see
+ *     src/lib/server/whatsapp-broadcast.ts for why it cannot live in the request.
+ *  2. Scheduled sends. Pending scheduled_messages whose time has passed are turned
+ *     into paced broadcasts and handed to the same queue. They used to be blasted
+ *     at every group at once via an uncapped Promise.allSettled - the same burst
+ *     the dashboard path was fixed for.
+ *  3. Orphan sweep. Legacy rows from the old in-request fan-out could be abandoned
+ *     mid-send with no terminal status, leaving "Sending..." forever. Those are
+ *     marked "not_sent". Queue-backed broadcasts are deliberately excluded: they
+ *     are *meant* to stay in flight for hours, and the queue finalises them.
  */
 import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
+import { drainBroadcastQueue, enqueueBroadcast } from "~/lib/server/whatsapp-broadcast";
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
-/** A broadcast in flight longer than this was abandoned by its function.
- *  Comfortably above the 300s maxDuration of the broadcast route. */
+/** A legacy broadcast in flight longer than this was abandoned by its function.
+ *  Comfortably above the old 300s maxDuration of the broadcast route. */
 const STUCK_AFTER_MINUTES = 10;
 
 const INTERRUPTED_NOTE =
@@ -39,9 +42,13 @@ type StuckBroadcast = {
 };
 
 /**
- * Marks abandoned broadcast rows as "not_sent" so the history stops claiming they
- * are still in flight. Best-effort: a failure here must not stop scheduled sends.
- * Returns the number of rows cleared.
+ * Marks abandoned pre-pacing broadcast rows as "not_sent" so the history stops
+ * claiming they are still in flight. Best-effort: a failure here must not stop the
+ * queue or scheduled sends. Returns the number of rows cleared.
+ *
+ * Only touches rows with no queue rows behind them. A paced broadcast legitimately
+ * sits in "sending" for as long as its groups take - sweeping those would kill
+ * every broadcast of more than ~10 minutes, which is all of them.
  */
 async function sweepOrphanedBroadcasts(supabase: SupabaseAdmin): Promise<number> {
   const cutoff = new Date(Date.now() - STUCK_AFTER_MINUTES * 60_000).toISOString();
@@ -58,8 +65,26 @@ async function sweepOrphanedBroadcasts(supabase: SupabaseAdmin): Promise<number>
   }
   if (!stuck || stuck.length === 0) return 0;
 
+  // Exclude anything the queue owns.
+  const ids = (stuck as StuckBroadcast[]).map((r) => r.id);
+  const { data: queued, error: queueError } = await supabase
+    .from("whatsapp_broadcast_queue")
+    .select("broadcast_id")
+    .in("broadcast_id", ids);
+
+  if (queueError) {
+    // Cannot tell paced from legacy - sweeping now risks killing a live broadcast,
+    // so do nothing and try again next tick.
+    console.warn("[cron/whatsapp] queue lookup failed, skipping sweep:", queueError.message);
+    return 0;
+  }
+
+  const paced = new Set((queued ?? []).map((r) => (r as { broadcast_id: string }).broadcast_id));
+  const legacy = (stuck as StuckBroadcast[]).filter((r) => !paced.has(r.id));
+  if (legacy.length === 0) return 0;
+
   let cleared = 0;
-  for (const row of stuck as StuckBroadcast[]) {
+  for (const row of legacy) {
     const marked = await supabase
       .from("whatsapp_broadcast_log")
       .update({ status: "not_sent", make_error: INTERRUPTED_NOTE })
@@ -77,7 +102,11 @@ async function sweepOrphanedBroadcasts(supabase: SupabaseAdmin): Promise<number>
         .update({ status: "failed", make_error: INTERRUPTED_NOTE })
         .eq("id", row.id);
       if (fallback.error) {
-        console.error("[cron/whatsapp] could not clear stuck broadcast", row.id, fallback.error.message);
+        console.error(
+          "[cron/whatsapp] could not clear stuck broadcast",
+          row.id,
+          fallback.error.message,
+        );
         continue;
       }
     }
@@ -104,6 +133,77 @@ async function sweepOrphanedBroadcasts(supabase: SupabaseAdmin): Promise<number>
   return cleared;
 }
 
+/**
+ * Turns every due scheduled_message into a paced broadcast. The row is marked
+ * "sent" once its groups are queued, not once they are delivered - delivery now
+ * spans hours and is tracked on the broadcast itself, which the row points at.
+ */
+async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number> {
+  const { data: due, error } = await supabase
+    .from("scheduled_messages")
+    .select("*")
+    .eq("status", "pending")
+    .lte("scheduled_at", new Date().toISOString());
+
+  if (error) {
+    console.error("[cron/whatsapp] could not read scheduled messages:", error.message);
+    return 0;
+  }
+  if (!due || due.length === 0) return 0;
+
+  let released = 0;
+
+  for (const msg of due) {
+    const accountId = msg.account_id as WhatsAppAccountId;
+    const groupIds = msg.group_ids as string[];
+    const groupNames = (msg.group_names as string[]) ?? [];
+
+    const fail = async (reason: string) => {
+      await supabase
+        .from("scheduled_messages")
+        .update({ status: "failed", sent_at: new Date().toISOString(), error: reason })
+        .eq("id", msg.id);
+      await sendAlertEmail(
+        `[AIIT Hub] Scheduled WhatsApp message FAILED (${accountId})`,
+        `A scheduled message could not be queued: ${reason}\n\nMessage: ${(msg.message as string).slice(0, 300)}`,
+      );
+    };
+
+    // Resolve the send webhook up front - each account has its own Make.com
+    // scenario / Green API instance, and a missing one should fail loudly here
+    // rather than on every group for the next several hours.
+    try {
+      getWebhookUrl(accountId, "sendMessage");
+    } catch {
+      await fail(`No send webhook is configured for account ${accountId}.`);
+      continue;
+    }
+
+    try {
+      const { broadcastId } = await enqueueBroadcast(supabase, {
+        accountId,
+        message: (msg.message as string) ?? null,
+        groupIds,
+        groupNames,
+      });
+
+      await supabase
+        .from("scheduled_messages")
+        .update({ status: "sent", sent_at: new Date().toISOString(), error: null })
+        .eq("id", msg.id);
+
+      released++;
+      console.log(
+        `[cron/whatsapp] scheduled message ${msg.id} queued as broadcast ${broadcastId} (${groupIds.length} groups)`,
+      );
+    } catch (err) {
+      await fail(err instanceof Error ? err.message : "Could not queue the broadcast");
+    }
+  }
+
+  return released;
+}
+
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -112,76 +212,11 @@ export async function GET(req: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // Runs before the early returns below so it never gets skipped on a quiet tick.
+  // Order matters: release due schedules into the queue before draining it, so a
+  // schedule that just came due can send its first group on this same tick.
   const sweptBroadcasts = await sweepOrphanedBroadcasts(supabase);
+  const scheduledReleased = await releaseScheduledMessages(supabase);
+  const groupsSent = await drainBroadcastQueue(supabase);
 
-  const { data: due, error: fetchError } = await supabase
-    .from("scheduled_messages")
-    .select("*")
-    .eq("status", "pending")
-    .lte("scheduled_at", new Date().toISOString());
-
-  if (fetchError) {
-    return NextResponse.json({ error: fetchError.message, sweptBroadcasts }, { status: 500 });
-  }
-
-  if (!due || due.length === 0) {
-    return NextResponse.json({ processed: 0, sweptBroadcasts });
-  }
-
-  for (const msg of due) {
-    const groupIds = msg.group_ids as string[];
-
-    // Resolve the send webhook for this row's account - each account has its own
-    // Make.com scenario / Green API instance
-    let webhookUrl: string;
-    try {
-      webhookUrl = getWebhookUrl(msg.account_id as WhatsAppAccountId, "sendMessage");
-    } catch {
-      await supabase
-        .from("scheduled_messages")
-        .update({
-          status: "failed",
-          sent_at: new Date().toISOString(),
-          error: `Send webhook not configured for account ${msg.account_id}`,
-        })
-        .eq("id", msg.id);
-      await sendAlertEmail(
-        `[AIIT Hub] Scheduled WhatsApp message FAILED (${msg.account_id})`,
-        `A scheduled message could not be sent: no send webhook is configured for account ${msg.account_id}.\n\nMessage: ${(msg.message as string).slice(0, 300)}`,
-      );
-      continue;
-    }
-
-    const results = await Promise.allSettled(
-      groupIds.map((chatId: string) =>
-        fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatId, message: msg.message }),
-        })
-      )
-    );
-
-    const allOk = results.every((r) => r.status === "fulfilled");
-
-    await supabase
-      .from("scheduled_messages")
-      .update({
-        status: allOk ? "sent" : "failed",
-        sent_at: new Date().toISOString(),
-        error: allOk ? null : "One or more groups failed to receive the message",
-      })
-      .eq("id", msg.id);
-
-    if (!allOk) {
-      const failedCount = results.filter((r) => r.status === "rejected").length;
-      await sendAlertEmail(
-        `[AIIT Hub] Scheduled WhatsApp message FAILED (${msg.account_id})`,
-        `A scheduled message failed for ${failedCount} of ${groupIds.length} groups.\n\nAccount: ${msg.account_id}\nMessage: ${(msg.message as string).slice(0, 300)}\nGroups: ${(msg.group_names as string[]).join(", ")}`,
-      );
-    }
-  }
-
-  return NextResponse.json({ processed: due.length, sweptBroadcasts });
+  return NextResponse.json({ groupsSent, scheduledReleased, sweptBroadcasts });
 }

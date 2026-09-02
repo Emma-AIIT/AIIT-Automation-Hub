@@ -317,9 +317,40 @@ Copy `.env.example` to `.env` and fill in all values. Get actual values from Zim
 - Config: [src/lib/config/whatsapp-accounts.ts](src/lib/config/whatsapp-accounts.ts)
 
 **API routes**:
-- `POST /api/whatsapp/send` — sends a broadcast message (routes to correct account via `accountId`)
+- `POST /api/whatsapp/broadcast` — **enqueues** a broadcast. Sends nothing itself.
+- `POST /api/whatsapp/send` — single immediate send (participants page)
 - `GET /api/whatsapp/download-phones` — exports participant phone numbers by account
 - `POST /api/whatsapp/import-participants-csv` — bulk imports participants (requires `WHATSAPP_IMPORT_SECRET`)
+
+**Broadcast pacing** — read this before touching the broadcast path:
+
+Groups go out **one at a time, `WHATSAPP_BROADCAST_INTERVAL_MINUTES` apart** (default
+15). That gap is the entire point of the feature: bursting a message to every group
+at once is what gets a WhatsApp number banned.
+
+The pacing lives in [src/lib/server/whatsapp-broadcast.ts](src/lib/server/whatsapp-broadcast.ts),
+not in Make.com. `/api/whatsapp/broadcast` writes one `whatsapp_broadcast_queue` row
+per group and returns; `/api/cron/whatsapp` releases at most one row per account per
+tick. It cannot live in the request — a 20 group broadcast runs for five hours and
+no serverless function lives that long.
+
+- **The Make.com send scenario must contain no Sleep modules.** It previously slept
+  900s before sending. That is where the spacing used to come from, by accident: the
+  old client loop awaited each webhook and was blocked for the full sleep. When the
+  send moved server-side the fan-out went parallel (batches of 8) and every group
+  landed at once — see the 2026-09-02 changelog entry. A sleep left in the scenario
+  now stacks on top of the app's interval and holds the connection past the 60s
+  send timeout, so delivered messages get logged as failures.
+- **Images are staged in the `whatsapp-broadcasts` storage bucket**, not held in
+  memory. The last group is sent hours later by a different invocation. The object
+  is deleted when the broadcast reaches a terminal status.
+- **`whatsapp_broadcast_log.sent_at` is the finish time**, only meaningful once the
+  last group has gone. Order history on `queued_at`.
+- **The orphan sweeper must never touch queue-backed rows.** It marks anything in
+  flight over 10 minutes as `not_sent`, which every paced broadcast is by design;
+  it skips any broadcast that has queue rows.
+- Broadcasts cap at 200 groups. At 15 minutes apart that is already ~2 days of
+  sending — a 568 group send would take 142 days.
 
 **Adding a new WhatsApp account**: Add to `WhatsAppAccountId` union type and `WHATSAPP_ACCOUNTS` array in `whatsapp-accounts.ts`, add 3 env vars per account, add entries to `getWebhookUrl()` map, create Make.com scenarios.
 

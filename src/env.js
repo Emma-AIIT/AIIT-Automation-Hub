@@ -47,6 +47,10 @@ export const env = createEnv({
     WHATSAPP_IMPORT_SECRET: z.string().min(1).optional(),
     WHATSAPP_ALERT_EMAIL: z.string().email().optional(),
     CRON_SECRET: z.string().min(1).optional(),
+    // Minutes between WhatsApp broadcast groups. Defaults to 15 when unset. This
+    // is the ban-avoidance interval - the Make.com scenario must not also sleep,
+    // or the two delays stack.
+    WHATSAPP_BROADCAST_INTERVAL_MINUTES: z.coerce.number().int().positive().optional(),
   },
 
   client: {
@@ -97,6 +101,7 @@ export const env = createEnv({
     WHATSAPP_IMPORT_SECRET: process.env.WHATSAPP_IMPORT_SECRET,
     WHATSAPP_ALERT_EMAIL: process.env.WHATSAPP_ALERT_EMAIL,
     CRON_SECRET: process.env.CRON_SECRET,
+    WHATSAPP_BROADCAST_INTERVAL_MINUTES: process.env.WHATSAPP_BROADCAST_INTERVAL_MINUTES,
   },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,
