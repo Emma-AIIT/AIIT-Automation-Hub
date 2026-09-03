@@ -137,7 +137,22 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
         <div className="flex items-center gap-1.5">
         {hasActive && (
           <button
-            onClick={() => tickMutation.mutate()}
+            onClick={() => {
+              // Guarded because this sends a real WhatsApp message the instant it
+              // is confirmed. The interval is what keeps the number off WhatsApp's
+              // ban radar, so nobody should reach a send by mis-clicking.
+              if (
+                confirm(
+                  'Send the next group now?\n\n' +
+                    'This delivers a real WhatsApp message immediately — it is not a test.\n\n' +
+                    'Sending too often is what gets a WhatsApp number banned, so only use ' +
+                    'this when you actually need the next group to go out sooner.\n\n' +
+                    'Continue?',
+                )
+              ) {
+                tickMutation.mutate();
+              }
+            }}
             disabled={tickMutation.isPending}
             className="text-xs font-medium px-2 py-1 rounded-lg border border-(--color-border-subtle) text-(--color-text-muted) hover:text-(--color-text-primary) hover:bg-(--color-bg-hover) transition disabled:opacity-40"
             title="Send the next due group now instead of waiting for the next cron tick. Still respects the interval."
