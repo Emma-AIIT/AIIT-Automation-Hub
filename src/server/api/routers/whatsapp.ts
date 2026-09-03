@@ -24,10 +24,7 @@ import { createAdminClient } from "~/lib/supabase/admin";
 import { WHATSAPP_ACCOUNTS, getWebhookUrl } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
-import {
-  cancelBroadcast as cancelBroadcastQueue,
-  drainBroadcastQueue,
-} from "~/lib/server/whatsapp-broadcast";
+import { cancelBroadcast as cancelBroadcastQueue } from "~/lib/server/whatsapp-broadcast";
 
 const accountIdSchema = z.enum(
   WHATSAPP_ACCOUNTS.map((a) => a.id) as [WhatsAppAccountId, ...WhatsAppAccountId[]]
@@ -332,21 +329,6 @@ export const whatsappRouter = createTRPCRouter({
         return { ...r, next_send_at: p?.next ?? null, pending_count: p?.count ?? 0 };
       });
     }),
-
-  /**
-   * Runs one queue tick on demand - the same work /api/cron/whatsapp does every
-   * minute, triggered from the dashboard.
-   *
-   * Deliberately does NOT bypass the interval. The 15 minute gap is the entire
-   * safety property of this feature, and a button that skips it would be the
-   * fastest way to get the number banned. Clicking it while an account is still
-   * inside its window is a no-op, and the result says how long is left so the
-   * button does not just look broken.
-   */
-  runQueueTick: publicProcedure.mutation(async () => {
-    const supabase = createAdminClient();
-    return await drainBroadcastQueue(supabase);
-  }),
 
   /**
    * Stops the groups a broadcast has not reached yet. A paced broadcast can run for
