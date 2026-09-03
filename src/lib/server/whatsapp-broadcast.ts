@@ -261,6 +261,19 @@ async function settleStaleClaims(supabase: SupabaseAdmin): Promise<void> {
 }
 
 /**
+ * What one drain actually did. The manual "Run now" button reports this back, so
+ * a tick that sends nothing can say why instead of looking broken.
+ */
+export type DrainResult = {
+  /** Groups actually sent this tick. */
+  sent: number;
+  /** Groups still queued across all accounts. */
+  pending: number;
+  /** Accounts holding the interval open, and how long is left on each. */
+  waiting: { accountId: string; minutesLeft: number }[];
+};
+
+/**
  * Releases at most one group per account per call - the pacing itself.
  *
  * Called on every cron tick (once a minute). An account whose last send was less
@@ -269,7 +282,7 @@ async function settleStaleClaims(supabase: SupabaseAdmin): Promise<void> {
  *
  * Returns how many groups actually went out this tick.
  */
-export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<number> {
+export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<DrainResult> {
   await settleStaleClaims(supabase);
 
   const nowIso = new Date().toISOString();
@@ -284,9 +297,9 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<numb
 
   if (dueError) {
     console.error("[whatsapp-broadcast] could not read queue:", dueError.message);
-    return 0;
+    return { sent: 0, pending: 0, waiting: [] };
   }
-  if (!dueRows || dueRows.length === 0) return 0;
+  if (!dueRows || dueRows.length === 0) return { sent: 0, pending: 0, waiting: [] };
 
   // One group per account per tick, oldest first. dueRows is already ordered, so the
   // first row seen for an account is the one to send.
@@ -296,6 +309,7 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<numb
   }
 
   let sentThisTick = 0;
+  const waiting: { accountId: string; minutesLeft: number }[] = [];
 
   for (const [accountId, row] of nextPerAccount) {
     // Hold the line against the account's last real send. send_after alone is not
@@ -312,7 +326,16 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<numb
       .maybeSingle();
 
     const lastSentAt = (lastSent as { sent_at: string } | null)?.sent_at;
-    if (lastSentAt && Date.now() - new Date(lastSentAt).getTime() < intervalMs()) continue;
+    if (lastSentAt) {
+      const elapsed = Date.now() - new Date(lastSentAt).getTime();
+      if (elapsed < intervalMs()) {
+        waiting.push({
+          accountId,
+          minutesLeft: Math.max(1, Math.ceil((intervalMs() - elapsed) / 60_000)),
+        });
+        continue;
+      }
+    }
 
     // Claim it. The status guard makes this atomic against an overlapping tick.
     const { data: claimed } = await supabase
@@ -398,7 +421,7 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<numb
     await refreshBroadcast(supabase, row.broadcast_id);
   }
 
-  return sentThisTick;
+  return { sent: sentThisTick, pending: dueRows.length, waiting };
 }
 
 /**

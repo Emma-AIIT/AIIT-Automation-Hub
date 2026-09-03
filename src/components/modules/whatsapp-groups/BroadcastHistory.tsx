@@ -76,6 +76,26 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
     onError: (err) => toast.error(err.message),
   });
 
+  // Runs a queue tick on demand instead of waiting up to a minute for the cron.
+  // It respects the interval, so clicking early reports the wait rather than
+  // skipping it — bypassing the gap is what gets the number banned.
+  const tickMutation = api.whatsapp.runQueueTick.useMutation({
+    onSuccess: (res) => {
+      if (res.sent > 0) {
+        toast.success(`Sent ${res.sent} group${res.sent === 1 ? '' : 's'}`);
+      } else if (res.waiting.length > 0) {
+        const soonest = Math.min(...res.waiting.map((w) => w.minutesLeft));
+        toast(`Nothing sent — the interval has ${soonest} min left on this number`, { icon: '⏳' });
+      } else if (res.pending > 0) {
+        toast(`Nothing due yet — ${res.pending} group${res.pending === 1 ? '' : 's'} still queued`);
+      } else {
+        toast('Queue is empty');
+      }
+      void refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   // Refetch when parent signals a new broadcast was just queued
   useEffect(() => {
     if (refreshBump !== undefined && refreshBump > 0) void refetch();
@@ -114,6 +134,17 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
           </div>
           <p className="text-xs text-(--color-text-muted) mt-0.5">Live status of queued and sent broadcasts from this page</p>
         </div>
+        <div className="flex items-center gap-1.5">
+        {hasActive && (
+          <button
+            onClick={() => tickMutation.mutate()}
+            disabled={tickMutation.isPending}
+            className="text-xs font-medium px-2 py-1 rounded-lg border border-(--color-border-subtle) text-(--color-text-muted) hover:text-(--color-text-primary) hover:bg-(--color-bg-hover) transition disabled:opacity-40"
+            title="Send the next due group now instead of waiting for the next cron tick. Still respects the interval."
+          >
+            {tickMutation.isPending ? 'Running…' : 'Run now'}
+          </button>
+        )}
         <button
           onClick={() => void refetch()}
           disabled={isLoading}
@@ -129,6 +160,7 @@ export function BroadcastHistory({ accountId, refreshBump }: BroadcastHistoryPro
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
         </button>
+        </div>
       </div>
 
       {/* Content */}

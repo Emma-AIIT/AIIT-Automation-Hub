@@ -216,7 +216,13 @@ export async function GET(req: NextRequest) {
   // schedule that just came due can send its first group on this same tick.
   const sweptBroadcasts = await sweepOrphanedBroadcasts(supabase);
   const scheduledReleased = await releaseScheduledMessages(supabase);
-  const groupsSent = await drainBroadcastQueue(supabase);
+  const drain = await drainBroadcastQueue(supabase);
 
-  return NextResponse.json({ groupsSent, scheduledReleased, sweptBroadcasts });
+  return NextResponse.json({
+    groupsSent: drain.sent,
+    stillQueued: drain.pending,
+    waiting: drain.waiting,
+    scheduledReleased,
+    sweptBroadcasts,
+  });
 }
