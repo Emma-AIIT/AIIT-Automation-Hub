@@ -47,6 +47,27 @@
 
 ## 📝 Changelog Entries
 
+### 2026-09-07 - Per-group send status in Broadcast History
+
+**Added**:
+- Expanding a Broadcast History entry's group list now shows each group's actual
+  send status (Sent / Waiting / Sending / Failed / Cancelled, with a colored dot)
+  instead of just a flat list of names. A failed group's error shows as a hover
+  tooltip. Live while a broadcast is still sending - polls every 4s same as the
+  rest of the row.
+- `whatsapp.getBroadcastGroupStatus` tRPC query - reads `whatsapp_broadcast_queue`
+  for one broadcast. Fetched only when that entry's group list is expanded
+  (mounted on demand), not joined into `listBroadcastHistory` for every row on
+  every poll.
+
+**Technical Details**:
+- Files modified: `src/server/api/routers/whatsapp.ts` (new query +
+  `BroadcastGroupStatus` type), `src/components/modules/whatsapp-groups/BroadcastHistory.tsx`
+  (new `GroupStatusList` component, `GROUP_STATUS_STYLES`).
+- Broadcasts from before paced sending (2026-09-02) have no
+  `whatsapp_broadcast_queue` rows at all - `hasQueueData: false` in the response
+  tells the UI to fall back to the old flat name list for those.
+
 ### 2026-09-07 - Reuse a past broadcast from history
 
 **Added**:

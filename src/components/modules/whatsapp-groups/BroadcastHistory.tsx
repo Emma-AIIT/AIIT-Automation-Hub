@@ -43,6 +43,80 @@ function formatCountdown(iso: string): string {
 
 const ACTIVE_STATUSES: BroadcastLogEntry['status'][] = ['queued', 'sending'];
 
+/** Per-group row status, from whatsapp_broadcast_queue - a smaller set than the
+ *  broadcast-level statuses above (no 'partial'/'not_sent'/'queued' per row). */
+const GROUP_STATUS_STYLES: Record<'pending' | 'sending' | 'sent' | 'failed' | 'cancelled', { dot: string; label: string; text: string }> = {
+  pending:   { dot: 'bg-slate-300',            label: 'Waiting',   text: 'text-(--color-text-faint)' },
+  sending:   { dot: 'bg-sky-500 animate-pulse', label: 'Sending…', text: 'text-sky-600' },
+  sent:      { dot: 'bg-[#25D366]',            label: 'Sent',      text: 'text-[#1a9e4e]' },
+  failed:    { dot: 'bg-red-400',              label: 'Failed',    text: 'text-red-500' },
+  cancelled: { dot: 'bg-slate-400',            label: 'Cancelled', text: 'text-(--color-text-faint)' },
+};
+
+/**
+ * Which groups within one broadcast have actually been sent to, which are still
+ * waiting, which failed. Only mounted when a history entry's group list is
+ * expanded, so it fetches on demand rather than for every row on every poll.
+ */
+function GroupStatusList({
+  accountId,
+  broadcastId,
+  fallbackNames,
+  isActive,
+}: {
+  accountId: WhatsAppAccountId;
+  broadcastId: string;
+  fallbackNames: string[];
+  isActive: boolean;
+}) {
+  const { data, isLoading } = api.whatsapp.getBroadcastGroupStatus.useQuery(
+    { accountId, broadcastId },
+    // Only worth re-polling while the broadcast is still sending - a finished
+    // one's per-group status never changes again.
+    { refetchInterval: isActive ? 4_000 : false },
+  );
+
+  if (isLoading) {
+    return <p className="text-[11px] text-(--color-text-faint)">Loading...</p>;
+  }
+
+  // Pre-pacing broadcasts (before 2026-09-02) have no per-group queue rows at
+  // all - fall back to a flat list, since there is no per-group status to show.
+  if (!data?.hasQueueData) {
+    return (
+      <ul className="space-y-0.5">
+        {fallbackNames.map((name, i) => (
+          <li key={i} className="text-xs text-(--color-text-primary) flex items-center gap-1.5">
+            <span className="w-1 h-1 rounded-full bg-(--color-text-faint) shrink-0" />
+            {name}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <ul className="space-y-1">
+      {data.groups.map((g, i) => {
+        const style = GROUP_STATUS_STYLES[g.status];
+        return (
+          <li
+            key={`${g.chat_id}-${i}`}
+            className="text-xs flex items-center gap-1.5"
+            title={g.error ?? undefined}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+            <span className="text-(--color-text-primary) flex-1 min-w-0 truncate">
+              {g.group_name ?? g.chat_id}
+            </span>
+            <span className={`text-[10px] font-medium shrink-0 ${style.text}`}>{style.label}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 interface BroadcastHistoryProps {
   accountId: WhatsAppAccountId;
   refreshBump?: number; // bump to trigger a refetch after a new send
@@ -282,20 +356,18 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                       )}
                     </div>
 
-                    {/* Expanded group list */}
+                    {/* Expanded group list, with per-group send status */}
                     {hasMoreGroups && isGroupsExpanded && (
                       <div className="mt-2 p-2.5 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle)">
                         <p className="text-[11px] font-medium text-(--color-text-muted) mb-1.5">
                           All {entry.group_names.length} groups
                         </p>
-                        <ul className="space-y-0.5">
-                          {entry.group_names.map((name, i) => (
-                            <li key={i} className="text-xs text-(--color-text-primary) flex items-center gap-1.5">
-                              <span className="w-1 h-1 rounded-full bg-(--color-text-faint) shrink-0" />
-                              {name}
-                            </li>
-                          ))}
-                        </ul>
+                        <GroupStatusList
+                          accountId={accountId}
+                          broadcastId={entry.id}
+                          fallbackNames={entry.group_names}
+                          isActive={isActive}
+                        />
                       </div>
                     )}
 

@@ -73,6 +73,15 @@ export interface BroadcastLogEntry {
   pending_count: number;
 }
 
+/** One group's send status within a broadcast, from whatsapp_broadcast_queue. */
+export interface BroadcastGroupStatus {
+  chat_id: string;
+  group_name: string | null;
+  status: "pending" | "sending" | "sent" | "failed" | "cancelled";
+  sent_at: string | null;
+  error: string | null;
+}
+
 export interface ParticipantMessageLogEntry {
   id: string;
   message: string | null;
@@ -328,6 +337,33 @@ export const whatsappRouter = createTRPCRouter({
         const p = progress.get(r.id);
         return { ...r, next_send_at: p?.next ?? null, pending_count: p?.count ?? 0 };
       });
+    }),
+
+  /**
+   * Per-group send status for one broadcast - which groups have actually been
+   * reached, which are still waiting, which failed. Fetched on demand when a
+   * Broadcast History entry's group list is expanded, rather than joined into
+   * listBroadcastHistory for every row on every poll.
+   *
+   * Broadcasts from before paced sending (2026-09-02) have no
+   * whatsapp_broadcast_queue rows at all - hasQueueData is false so the caller
+   * can fall back to a flat group list under the broadcast's own status.
+   */
+  getBroadcastGroupStatus: publicProcedure
+    .input(z.object({ accountId: accountIdSchema, broadcastId: z.string().uuid() }))
+    .query(async ({ input }): Promise<{ hasQueueData: boolean; groups: BroadcastGroupStatus[] }> => {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase
+        .from("whatsapp_broadcast_queue")
+        .select("chat_id, group_name, status, sent_at, error")
+        .eq("broadcast_id", input.broadcastId)
+        .eq("account_id", input.accountId)
+        .order("position", { ascending: true });
+
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+
+      const groups = (data ?? []) as BroadcastGroupStatus[];
+      return { hasQueueData: groups.length > 0, groups };
     }),
 
   /**
