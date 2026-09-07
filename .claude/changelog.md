@@ -47,6 +47,43 @@
 
 ## 📝 Changelog Entries
 
+### 2026-09-07 - Reuse a past broadcast from history
+
+**Added**:
+- "Reuse" button on every Broadcast History entry (whatever its status - queued,
+  sending, sent, failed, partial, cancelled). Loads that broadcast's message text
+  and image straight back into the composer so it can be edited, re-targeted to a
+  fresh group selection, and sent again. Mirrors the "click a saved script to load
+  it" pattern already used by Outbound Calls' Script Library.
+- `whatsapp.getBroadcastImageUrl` tRPC query - returns a short-lived signed URL
+  (60s) for a broadcast's staged image. The `whatsapp-broadcasts` bucket is
+  private, so the composer fetches this URL, downloads the blob, and rebuilds it
+  into a `File` the same way a freshly picked file would work.
+
+**Changed**:
+- Broadcast images are no longer deleted from the `whatsapp-broadcasts` bucket
+  once a broadcast finishes. They used to be removed as cleanup (`discardImage()`
+  in `refreshBroadcast()`), which made "reuse" impossible for anything with an
+  image - the row's `image_path` pointed at a file that no longer existed. Images
+  now persist indefinitely; there is no cleanup job for them yet.
+
+**Technical Details**:
+- Files modified: `src/lib/server/whatsapp-broadcast.ts` (removed `discardImage`
+  and its call site), `src/server/api/routers/whatsapp.ts` (added
+  `getBroadcastImageUrl`), `src/components/modules/whatsapp-groups/BroadcastHistory.tsx`
+  (added `onReuse` prop + button), `src/app/automations/whatsapp-groups/page.tsx`
+  (added `handleReuseBroadcast`).
+- Migration: `supabase/migrations/20260907000000_keep_broadcast_images_for_reuse.sql`
+  updates the `image_path` column comment only - no schema change, since the
+  column already existed.
+
+**Known Issues**:
+- Broadcasts sent before this change already had their images deleted by the old
+  cleanup - "Reuse" on those will load the text but fail to restore the image
+  (toast explains why).
+- No retention/cleanup policy for images yet, so the bucket now grows without
+  bound. Fine at current volume; revisit if storage becomes a concern.
+
 ### 2026-09-02 - WhatsApp broadcasts paced again
 
 **Fixed**:

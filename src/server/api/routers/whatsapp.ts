@@ -24,7 +24,7 @@ import { createAdminClient } from "~/lib/supabase/admin";
 import { WHATSAPP_ACCOUNTS, getWebhookUrl } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
-import { cancelBroadcast as cancelBroadcastQueue } from "~/lib/server/whatsapp-broadcast";
+import { cancelBroadcast as cancelBroadcastQueue, BROADCAST_BUCKET } from "~/lib/server/whatsapp-broadcast";
 
 const accountIdSchema = z.enum(
   WHATSAPP_ACCOUNTS.map((a) => a.id) as [WhatsAppAccountId, ...WhatsAppAccountId[]]
@@ -328,6 +328,41 @@ export const whatsappRouter = createTRPCRouter({
         const p = progress.get(r.id);
         return { ...r, next_send_at: p?.next ?? null, pending_count: p?.count ?? 0 };
       });
+    }),
+
+  /**
+   * Signed URL for a past broadcast's staged image, so "reuse this message" in
+   * Broadcast History can pull the image back into the composer. The bucket is
+   * private (service role only), so the path itself is never sent to the client -
+   * only a short-lived signed URL, fetched fresh each time it's needed.
+   */
+  getBroadcastImageUrl: publicProcedure
+    .input(z.object({ accountId: accountIdSchema, broadcastId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase
+        .from("whatsapp_broadcast_log")
+        .select("image_path, file_name")
+        .eq("id", input.broadcastId)
+        .eq("account_id", input.accountId)
+        .single();
+
+      const row = data as { image_path: string | null; file_name: string | null } | null;
+      if (error || !row?.image_path) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "This broadcast has no image" });
+      }
+
+      const { data: signed, error: signError } = await supabase.storage
+        .from(BROADCAST_BUCKET)
+        .createSignedUrl(row.image_path, 60);
+      if (signError || !signed) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: signError?.message ?? "Could not sign the image URL",
+        });
+      }
+
+      return { url: signed.signedUrl, fileName: row.file_name ?? "image" };
     }),
 
   /**

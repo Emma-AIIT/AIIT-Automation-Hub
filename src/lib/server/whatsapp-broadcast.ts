@@ -27,8 +27,10 @@ import { sendAlertEmail } from "~/lib/server/alerts";
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
-/** Storage bucket holding broadcast images between the request that accepted the
- *  broadcast and the cron ticks that send it, hours later. */
+/** Storage bucket holding broadcast images. Images are kept after the broadcast
+ *  finishes (not just staged between the accepting request and the cron ticks
+ *  that send it) so a past broadcast's message and image can be reused from
+ *  Broadcast History - see whatsapp.getBroadcastImageUrl. */
 export const BROADCAST_BUCKET = "whatsapp-broadcasts";
 
 /** Minutes between groups. The ban-avoidance interval - override per environment
@@ -146,14 +148,6 @@ async function loadImage(
   return { blob: data, name: log.file_name ?? "image" };
 }
 
-/** Removes a finished broadcast's staged image. Best-effort: an orphaned object is
- *  cosmetic, a thrown error here would strand the broadcast. */
-async function discardImage(supabase: SupabaseAdmin, imagePath: string | null): Promise<void> {
-  if (!imagePath) return;
-  const { error } = await supabase.storage.from(BROADCAST_BUCKET).remove([imagePath]);
-  if (error) console.warn("[whatsapp-broadcast] could not delete staged image:", error.message);
-}
-
 /**
  * Recomputes a broadcast's counts from its queue rows and, once nothing is left in
  * flight, writes the terminal status and clears the staged image. Counting the rows
@@ -215,7 +209,6 @@ async function refreshBroadcast(supabase: SupabaseAdmin, broadcastId: string): P
     .eq("id", broadcastId);
 
   const logRow = log as BroadcastLogRow | null;
-  await discardImage(supabase, logRow?.image_path ?? null);
 
   if (counts.failed > 0 && logRow) {
     const accountName =

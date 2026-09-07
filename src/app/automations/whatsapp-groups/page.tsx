@@ -26,6 +26,7 @@ import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledLis
 import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
 import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
+import type { BroadcastLogEntry } from '@/server/api/routers/whatsapp';
 
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 
@@ -52,7 +53,9 @@ export default function WhatsAppBroadcastPage() {
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleCreatedBump, setScheduleCreatedBump] = useState(0);
   const [broadcastHistoryBump, setBroadcastHistoryBump] = useState(0);
+  const [isLoadingReuseImage, setIsLoadingReuseImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const utils = api.useUtils();
 
   const handleAccountSwitch = useCallback((id: WhatsAppAccountId) => {
     setActiveAccount(id);
@@ -134,6 +137,50 @@ export default function WhatsAppBroadcastPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
+  // "Reuse" from Broadcast History - loads a past (or still in-flight) broadcast's
+  // message and image back into the composer so it can be edited, re-targeted to a
+  // fresh set of groups, and sent again. Group selection is intentionally cleared
+  // rather than restored: the whole point is picking groups again.
+  const handleReuseBroadcast = useCallback(async (entry: BroadcastLogEntry) => {
+    setMessage(entry.message ?? '');
+    setImage(null);
+    setImagePreview(null);
+    setSelectedIds(new Set());
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    if (!entry.has_file) {
+      toast.success('Message loaded — choose groups and send.');
+      return;
+    }
+
+    setIsLoadingReuseImage(true);
+    try {
+      const { url, fileName } = await utils.whatsapp.getBroadcastImageUrl.fetch({
+        accountId: activeAccount,
+        broadcastId: entry.id,
+      });
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Could not download the image');
+      const blob = await res.blob();
+      const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
+
+      setImage(file);
+      const reader = new FileReader();
+      reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+
+      toast.success('Message and image loaded — choose groups and send.');
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `Loaded the message, but the image could not be restored: ${err.message}`
+          : 'Loaded the message, but the image could not be restored.',
+      );
+    } finally {
+      setIsLoadingReuseImage(false);
+    }
+  }, [activeAccount, utils]);
+
   // Queues the whole broadcast in ONE request — the server fans out to Make.com in the
   // background and the history panel below shows live progress. The composer clears as
   // soon as the broadcast is accepted, so the next message can be queued immediately
@@ -198,7 +245,11 @@ export default function WhatsAppBroadcastPage() {
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
 
-  const canSend = (message.trim().length > 0 || image !== null) && selectedIds.size > 0 && !isSending;
+  const canSend =
+    (message.trim().length > 0 || image !== null) &&
+    selectedIds.size > 0 &&
+    !isSending &&
+    !isLoadingReuseImage;
 
   return (
     <div className="p-6 md:p-8 space-y-6">
@@ -281,7 +332,14 @@ export default function WhatsAppBroadcastPage() {
             </div>
 
             {/* Image attachment */}
-            {image && imagePreview ? (
+            {isLoadingReuseImage ? (
+              <div className="flex items-center gap-2.5 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)">
+                <svg className="animate-spin text-(--color-text-muted)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                <span className="text-xs text-(--color-text-muted)">Loading image from history...</span>
+              </div>
+            ) : image && imagePreview ? (
               <div className="flex items-center gap-3 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)">
                 <Image
                   src={imagePreview}
@@ -421,7 +479,11 @@ export default function WhatsAppBroadcastPage() {
       <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />
 
       {/* Broadcast history (immediate sends log) */}
-      <BroadcastHistory accountId={activeAccount} refreshBump={broadcastHistoryBump} />
+      <BroadcastHistory
+        accountId={activeAccount}
+        refreshBump={broadcastHistoryBump}
+        onReuse={(entry) => void handleReuseBroadcast(entry)}
+      />
 
       {/* Schedule modal */}
       <ScheduleModal
