@@ -47,6 +47,27 @@
 
 ## 📝 Changelog Entries
 
+### 2026-09-07 - "Show status" available on every broadcast, with timestamps
+
+**Fixed**:
+- The per-group status panel (added earlier the same day) only appeared on
+  broadcasts with more than 2 groups, because it reused the old "+N more"
+  toggle which was gated on `group_names.length > 2`. A 2-group test broadcast
+  had no way to open it at all. The toggle is now its own "show status" /
+  "hide status" link shown on every broadcast regardless of group count.
+
+**Added**:
+- Sent and failed groups now show the actual time it happened (Sydney time,
+  e.g. "Sent · 2:24 PM"). Pending groups show when they're next due (e.g.
+  "Waiting · in 12 min"), using each row's own `send_after` rather than only
+  the broadcast-level "next any moment" line.
+- `whatsapp.getBroadcastGroupStatus` now also selects `send_after`.
+
+**Technical Details**:
+- Files modified: `src/server/api/routers/whatsapp.ts` (added `send_after` to
+  `BroadcastGroupStatus` and the query), `src/components/modules/whatsapp-groups/BroadcastHistory.tsx`
+  (`formatSydneyShortTime`, per-group `detail` line, ungated toggle).
+
 ### 2026-09-07 - Per-group send status in Broadcast History
 
 **Added**:

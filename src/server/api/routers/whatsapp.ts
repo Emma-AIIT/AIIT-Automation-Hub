@@ -79,6 +79,8 @@ export interface BroadcastGroupStatus {
   group_name: string | null;
   status: "pending" | "sending" | "sent" | "failed" | "cancelled";
   sent_at: string | null;
+  /** Earliest this group may go out - the only useful time for a still-pending row. */
+  send_after: string;
   error: string | null;
 }
 
@@ -355,7 +357,7 @@ export const whatsappRouter = createTRPCRouter({
       const supabase = createAdminClient();
       const { data, error } = await supabase
         .from("whatsapp_broadcast_queue")
-        .select("chat_id, group_name, status, sent_at, error")
+        .select("chat_id, group_name, status, sent_at, send_after, error")
         .eq("broadcast_id", input.broadcastId)
         .eq("account_id", input.accountId)
         .order("position", { ascending: true });

@@ -18,6 +18,12 @@ function formatSydneyTime(isoString: string): string {
   return formatInTimeZone(new Date(isoString), SYDNEY_TZ, "EEE d MMM · h:mm a zzz");
 }
 
+/** Just the time, for the per-group status list - the day/timezone are already
+ *  implied by the broadcast's own header line right above it. */
+function formatSydneyShortTime(isoString: string): string {
+  return formatInTimeZone(new Date(isoString), SYDNEY_TZ, "h:mm a");
+}
+
 const STATUS_STYLES: Record<BroadcastLogEntry['status'], { dot: string; label: string; badge: string }> = {
   queued:   { dot: 'bg-sky-400 animate-pulse',  label: 'Queued',   badge: 'bg-sky-50 text-sky-600 border-sky-200' },
   sending:  { dot: 'bg-sky-500 animate-pulse',  label: 'Sending…', badge: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -99,6 +105,14 @@ function GroupStatusList({
     <ul className="space-y-1">
       {data.groups.map((g, i) => {
         const style = GROUP_STATUS_STYLES[g.status];
+        // Sent/failed: when it happened. Pending: when it's due next. Sending
+        // has nothing more useful to add - it's happening right now.
+        let detail: string | null = null;
+        if ((g.status === 'sent' || g.status === 'failed') && g.sent_at) {
+          detail = formatSydneyShortTime(g.sent_at);
+        } else if (g.status === 'pending') {
+          detail = formatCountdown(g.send_after);
+        }
         return (
           <li
             key={`${g.chat_id}-${i}`}
@@ -109,7 +123,10 @@ function GroupStatusList({
             <span className="text-(--color-text-primary) flex-1 min-w-0 truncate">
               {g.group_name ?? g.chat_id}
             </span>
-            <span className={`text-[10px] font-medium shrink-0 ${style.text}`}>{style.label}</span>
+            <span className={`text-[10px] font-medium shrink-0 ${style.text}`}>
+              {style.label}
+              {detail && <span className="text-(--color-text-faint) font-normal"> · {detail}</span>}
+            </span>
           </li>
         );
       })}
@@ -277,19 +294,14 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                       <span className="text-xs text-(--color-text-muted)">
                         {groupSummary}
-                        {hasMoreGroups && (
-                          <>
-                            {', '}
-                            <button
-                              onClick={() => toggleGroups(entry.id)}
-                              className="text-xs text-(--color-text-faint) hover:text-(--color-text-muted) hover:underline transition"
-                            >
-                              {isGroupsExpanded
-                                ? 'show less'
-                                : `+${entry.group_names.length - 2} more`}
-                            </button>
-                          </>
-                        )}
+                        {hasMoreGroups && !isGroupsExpanded && ` +${entry.group_names.length - 2} more`}
+                        {' · '}
+                        <button
+                          onClick={() => toggleGroups(entry.id)}
+                          className="text-xs text-(--color-text-faint) hover:text-(--color-text-muted) hover:underline transition"
+                        >
+                          {isGroupsExpanded ? 'hide status' : 'show status'}
+                        </button>
                       </span>
                       <span className="text-xs text-(--color-text-faint)">·</span>
                       <span className="text-xs text-(--color-text-muted)">
@@ -356,11 +368,12 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                       )}
                     </div>
 
-                    {/* Expanded group list, with per-group send status */}
-                    {hasMoreGroups && isGroupsExpanded && (
+                    {/* Expanded group list, with per-group send status - available
+                        for every broadcast, not just ones with more than 2 groups */}
+                    {isGroupsExpanded && (
                       <div className="mt-2 p-2.5 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle)">
                         <p className="text-[11px] font-medium text-(--color-text-muted) mb-1.5">
-                          All {entry.group_names.length} groups
+                          Status by group ({entry.group_names.length})
                         </p>
                         <GroupStatusList
                           accountId={accountId}
