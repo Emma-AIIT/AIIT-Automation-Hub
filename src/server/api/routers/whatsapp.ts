@@ -507,6 +507,44 @@ export const whatsappRouter = createTRPCRouter({
     }),
 
   /**
+   * Permanently removes a broadcast (and its queue rows, via ON DELETE CASCADE)
+   * and any staged attachments - added to let test broadcasts be cleared out of
+   * Broadcast History, not meant as a permanent feature of the page. Refuses
+   * anything still queued/sending so an in-flight broadcast can't be deleted out
+   * from under the cron - stop or wait for it to finish first.
+   */
+  deleteBroadcast: publicProcedure
+    .input(z.object({ accountId: accountIdSchema, broadcastId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { data, error: fetchError } = await supabase
+        .from("whatsapp_broadcast_log")
+        .select("status, image_paths")
+        .eq("id", input.broadcastId)
+        .eq("account_id", input.accountId)
+        .single();
+
+      const row = data as { status: string; image_paths: string[] | null } | null;
+      if (fetchError || !row) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Broadcast not found" });
+      }
+      if (row.status === "queued" || row.status === "sending") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Stop this broadcast (or let it finish) before deleting it",
+        });
+      }
+
+      if (row.image_paths && row.image_paths.length > 0) {
+        await supabase.storage.from(BROADCAST_BUCKET).remove(row.image_paths);
+      }
+
+      const { error } = await supabase.from("whatsapp_broadcast_log").delete().eq("id", input.broadcastId);
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      return { success: true };
+    }),
+
+  /**
    * Freezes a broadcast in place - unlike cancelBroadcast this is not terminal.
    * Remaining groups just sit untouched in the queue until resumeBroadcast is
    * called, so pausing to test something else against the same account does not
