@@ -159,6 +159,45 @@ export function intervalMs(minutes?: number | null): number {
   return (minutes ?? BROADCAST_INTERVAL_MINUTES) * 60_000;
 }
 
+/** When this account last actually sent a group, across every broadcast on it -
+ *  the anchor drainBroadcastQueue's pacing gate measures from. Null if it has
+ *  never sent one. */
+export async function getLastSentAt(supabase: SupabaseAdmin, accountId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("whatsapp_broadcast_queue")
+    .select("sent_at")
+    .eq("account_id", accountId)
+    .eq("status", "sent")
+    .not("sent_at", "is", null)
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { sent_at: string } | null)?.sent_at ?? null;
+}
+
+/**
+ * Predicts when each pending row will actually be released, mirroring
+ * drainBroadcastQueue's real gate: at most one send per account per interval,
+ * oldest due row first. `rows` must already be in that release order (send_after
+ * ascending, then position - the same ordering drainBroadcastQueue queries with)
+ * with any paused broadcasts' rows already excluded.
+ *
+ * The naive per-row send_after (set once at enqueue time) drifts from reality the
+ * moment one actual send lands later than its own nominal slot - which happens on
+ * every broadcast, since the cron polls once a minute and Make.com/Green API take
+ * a few seconds to answer. This chains forward from the account's last real send
+ * instead, so the on-screen countdown matches what will actually happen rather
+ * than the original static schedule.
+ */
+export function predictSendTimes(rows: { send_after: string }[], lastSentAt: string | null): Date[] {
+  let floor = lastSentAt ? new Date(lastSentAt).getTime() + intervalMs() : 0;
+  return rows.map((row) => {
+    const predicted = Math.max(new Date(row.send_after).getTime(), floor);
+    floor = predicted + intervalMs();
+    return new Date(predicted);
+  });
+}
+
 /** Fetches every staged attachment for a broadcast, or [] when it is text-only. */
 async function loadImages(
   supabase: SupabaseAdmin,

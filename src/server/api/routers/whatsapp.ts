@@ -28,6 +28,8 @@ import {
   cancelBroadcast as cancelBroadcastQueue,
   pauseBroadcast as pauseBroadcastQueue,
   resumeBroadcast as resumeBroadcastQueue,
+  getLastSentAt,
+  predictSendTimes,
   BROADCAST_BUCKET,
 } from "~/lib/server/whatsapp-broadcast";
 
@@ -89,7 +91,9 @@ export interface BroadcastGroupStatus {
   group_name: string | null;
   status: "pending" | "sending" | "sent" | "failed" | "cancelled";
   sent_at: string | null;
-  /** Earliest this group may go out - the only useful time for a still-pending row. */
+  /** For a pending row, the predicted send time (see predictSendTimes) - not the
+   *  raw enqueue-time value, which drifts from reality once any earlier send lands
+   *  late. Meaningless once the row is sent/failed/cancelled. */
   send_after: string;
   error: string | null;
 }
@@ -328,7 +332,7 @@ export const whatsappRouter = createTRPCRouter({
         return rows.map((r) => ({ ...r, next_send_at: null, pending_count: 0 }));
       }
 
-      const { data: pending } = await supabase
+      const { data: pendingRows } = await supabase
         .from("whatsapp_broadcast_queue")
         .select("broadcast_id, send_after")
         .in(
@@ -336,19 +340,39 @@ export const whatsappRouter = createTRPCRouter({
           active.map((r) => r.id),
         )
         .eq("status", "pending")
-        .order("send_after", { ascending: true });
+        .order("send_after", { ascending: true })
+        .order("position", { ascending: true });
 
-      const progress = new Map<string, { next: string; count: number }>();
-      for (const row of (pending ?? []) as { broadcast_id: string; send_after: string }[]) {
-        const seen = progress.get(row.broadcast_id);
-        if (seen) seen.count++;
-        else progress.set(row.broadcast_id, { next: row.send_after, count: 1 });
+      const pending = (pendingRows ?? []) as { broadcast_id: string; send_after: string }[];
+
+      const pendingCounts = new Map<string, number>();
+      for (const row of pending) {
+        pendingCounts.set(row.broadcast_id, (pendingCounts.get(row.broadcast_id) ?? 0) + 1);
       }
 
-      return rows.map((r) => {
-        const p = progress.get(r.id);
-        return { ...r, next_send_at: p?.next ?? null, pending_count: p?.count ?? 0 };
+      // The naive earliest send_after per broadcast drifts from reality as soon as
+      // one real send lands later than its own nominal slot (see predictSendTimes).
+      // drainBroadcastQueue releases at most one row per ACCOUNT per tick - not per
+      // broadcast, and never a paused one - so predicting accurately means chaining
+      // across every pending row on this account together, in the same order the
+      // cron would actually release them.
+      const pausedBroadcastIds = new Set(rows.filter((r) => r.paused).map((r) => r.id));
+      const releasable = pending.filter((row) => !pausedBroadcastIds.has(row.broadcast_id));
+      const lastSentAt = await getLastSentAt(supabase, input.accountId);
+      const predicted = predictSendTimes(releasable, lastSentAt);
+
+      const nextSendAt = new Map<string, string>();
+      releasable.forEach((row, i) => {
+        if (!nextSendAt.has(row.broadcast_id)) {
+          nextSendAt.set(row.broadcast_id, predicted[i]!.toISOString());
+        }
       });
+
+      return rows.map((r) => ({
+        ...r,
+        next_send_at: r.paused ? null : (nextSendAt.get(r.id) ?? null),
+        pending_count: pendingCounts.get(r.id) ?? 0,
+      }));
     }),
 
   /**
@@ -367,15 +391,59 @@ export const whatsappRouter = createTRPCRouter({
       const supabase = createAdminClient();
       const { data, error } = await supabase
         .from("whatsapp_broadcast_queue")
-        .select("chat_id, group_name, status, sent_at, send_after, error")
+        .select("id, chat_id, group_name, status, sent_at, send_after, error")
         .eq("broadcast_id", input.broadcastId)
         .eq("account_id", input.accountId)
         .order("position", { ascending: true });
 
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
 
-      const groups = (data ?? []) as BroadcastGroupStatus[];
-      return { hasQueueData: groups.length > 0, groups };
+      const groups = (data ?? []) as (BroadcastGroupStatus & { id: string })[];
+      if (groups.length === 0) return { hasQueueData: false, groups: [] };
+
+      const pendingHere = groups.some((g) => g.status === "pending");
+      if (!pendingHere) {
+        return { hasQueueData: true, groups: groups.map(({ id: _id, ...g }) => g) };
+      }
+
+      // Same reasoning as listBroadcastHistory: drainBroadcastQueue releases oldest-
+      // due-first across the WHOLE account's queue, not just this broadcast's own
+      // rows, and skips anything paused - so an accurate per-group ETA has to
+      // predict across every pending row on the account, then read off this
+      // broadcast's rows from that chain.
+      const { data: pausedLogs } = await supabase
+        .from("whatsapp_broadcast_log")
+        .select("id")
+        .eq("account_id", input.accountId)
+        .eq("paused", true);
+      const pausedBroadcastIds = new Set((pausedLogs ?? []).map((r) => (r as { id: string }).id));
+
+      const { data: accountPendingRaw } = await supabase
+        .from("whatsapp_broadcast_queue")
+        .select("id, broadcast_id, send_after")
+        .eq("account_id", input.accountId)
+        .eq("status", "pending")
+        .order("send_after", { ascending: true })
+        .order("position", { ascending: true });
+
+      const releasable = ((accountPendingRaw ?? []) as { id: string; broadcast_id: string; send_after: string }[])
+        .filter((row) => !pausedBroadcastIds.has(row.broadcast_id));
+
+      const lastSentAt = await getLastSentAt(supabase, input.accountId);
+      const predicted = predictSendTimes(releasable, lastSentAt);
+      const etaById = new Map<string, string>();
+      releasable.forEach((row, i) => etaById.set(row.id, predicted[i]!.toISOString()));
+
+      return {
+        hasQueueData: true,
+        groups: groups.map(({ id, ...g }) => ({
+          ...g,
+          // Overwrite the naive per-row send_after with the account-wide predicted
+          // time for still-pending rows - sent/failed/cancelled rows are already
+          // history and keep their real send_after.
+          send_after: g.status === "pending" ? (etaById.get(id) ?? g.send_after) : g.send_after,
+        })),
+      };
     }),
 
   /**
