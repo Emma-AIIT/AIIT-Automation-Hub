@@ -80,24 +80,37 @@ export type BroadcastFile = { blob: Blob; name: string };
  * Posts one group's message to Make.com. Throws on timeout or any non-2xx.
  *
  * WhatsApp has no multi-attachment message, so when there is more than one file
- * this sends one request per file, in order - the text (if any) rides along with
- * the first one. A failure partway through throws immediately, leaving the
- * remaining files unsent for this attempt.
+ * this sends one request per file, in order - the caption (if any) rides along
+ * with the LAST one, so it reads as "all the images, then the text" under the
+ * final image, the way a person sharing several photos with a caption expects.
+ * Every request includes a `message` field even when there is nothing to caption
+ * that attachment with (sent as an empty string) - the Make.com scenario has it
+ * as a required parameter and rejects a request that omits it entirely with a
+ * BundleValidationError, which is exactly what a plain `if (i === 0)` guard used
+ * to trigger on attachment 2+.
+ *
+ * A failure partway through throws immediately, leaving the remaining files
+ * unsent for this attempt. `onAttachmentSent` fires after each one actually goes
+ * out, before the whole call is known to succeed or fail - see its doc comment
+ * for why the caller needs that.
  *
  * NOTE on retries: the caller retries the whole group on a retryable error (see
  * drainBroadcastQueue), which resends every file from the top - including any
- * that already went out before the failing one. This mirrors the existing
- * timeout/duplicate tradeoff documented in describeSendError below; per-file
- * retry would need a queue row per file, which is more machinery than a broadcast
- * attachment list currently warrants.
+ * that already went out before the failing one. Per-file retry would need a
+ * queue row per file, which is more machinery than a broadcast attachment list
+ * currently warrants - this is an accepted tradeoff, not something this fixes.
  */
 export async function sendToGroup(opts: {
   webhookUrl: string;
   chatId: string;
   message: string | null;
   files: BroadcastFile[];
+  /** Invoked immediately after each attachment is confirmed delivered to
+   *  Make.com, so the caller can record the real contact moment even if a later
+   *  attachment in the same call fails. See its use in drainBroadcastQueue. */
+  onAttachmentSent?: () => void | Promise<void>;
 }): Promise<void> {
-  const { webhookUrl, chatId, message, files } = opts;
+  const { webhookUrl, chatId, message, files, onAttachmentSent } = opts;
 
   if (files.length === 0) {
     const signal = AbortSignal.timeout(SEND_TIMEOUT_MS);
@@ -116,10 +129,11 @@ export async function sendToGroup(opts: {
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i]!;
+    const isLast = i === files.length - 1;
     const signal = AbortSignal.timeout(SEND_TIMEOUT_MS);
     const form = new FormData();
     form.append("chatId", chatId);
-    if (i === 0 && message) form.append("message", message);
+    form.append("message", isLast && message ? message : "");
     form.append("file", file.blob, file.name);
     const res = await fetch(webhookUrl, { method: "POST", body: form, signal });
     if (!res.ok) {
@@ -129,6 +143,7 @@ export async function sendToGroup(opts: {
           (files.length > 1 ? ` (attachment ${i + 1} of ${files.length})` : ""),
       );
     }
+    await onAttachmentSent?.();
   }
 }
 
@@ -159,15 +174,24 @@ export function intervalMs(minutes?: number | null): number {
   return (minutes ?? BROADCAST_INTERVAL_MINUTES) * 60_000;
 }
 
-/** When this account last actually sent a group, across every broadcast on it -
- *  the anchor drainBroadcastQueue's pacing gate measures from. Null if it has
- *  never sent one. */
+/**
+ * When this account last actually made contact with a WhatsApp group - the
+ * anchor drainBroadcastQueue's pacing gate measures from. Null if it never has.
+ *
+ * Deliberately NOT filtered to status='sent'. A multi-attachment group can
+ * deliver its first image to Make.com and then fail on the second, leaving the
+ * row "pending" (queued for retry) or "failed" - but that first image genuinely
+ * reached WhatsApp, and the ban-avoidance gate this whole queue exists for has
+ * to respect that real contact regardless of the row's own terminal status.
+ * sent_at is set the moment any attachment (or the sole text send) succeeds -
+ * see the onAttachmentSent wiring below - so any row with a non-null sent_at
+ * represents a real send, whatever status it ends up in.
+ */
 export async function getLastSentAt(supabase: SupabaseAdmin, accountId: string): Promise<string | null> {
   const { data } = await supabase
     .from("whatsapp_broadcast_queue")
     .select("sent_at")
     .eq("account_id", accountId)
-    .eq("status", "sent")
     .not("sent_at", "is", null)
     .order("sent_at", { ascending: false })
     .limit(1)
@@ -392,17 +416,7 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
     // Hold the line against the account's last real send. send_after alone is not
     // enough: a second broadcast queued later has its own timeline and would
     // otherwise double the rate on this number.
-    const { data: lastSent } = await supabase
-      .from("whatsapp_broadcast_queue")
-      .select("sent_at")
-      .eq("account_id", accountId)
-      .eq("status", "sent")
-      .not("sent_at", "is", null)
-      .order("sent_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const lastSentAt = (lastSent as { sent_at: string } | null)?.sent_at;
+    const lastSentAt = await getLastSentAt(supabase, accountId);
     if (lastSentAt) {
       const elapsed = Date.now() - new Date(lastSentAt).getTime();
       if (elapsed < intervalMs()) {
@@ -455,7 +469,23 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
     try {
       const webhookUrl = getWebhookUrl(accountId as WhatsAppAccountId, "sendMessage");
       const files = await loadImages(supabase, log);
-      await sendToGroup({ webhookUrl, chatId: row.chat_id, message: log.message, files });
+      await sendToGroup({
+        webhookUrl,
+        chatId: row.chat_id,
+        message: log.message,
+        files,
+        // Stamp sent_at the moment each attachment actually lands, not only once
+        // the whole group succeeds. If a later attachment then fails, the catch
+        // block below leaves this stamp in place (it only ever writes
+        // status/error/send_after) - so getLastSentAt still sees the real contact
+        // that happened here, and the next group waits the full interval from it.
+        onAttachmentSent: async () => {
+          await supabase
+            .from("whatsapp_broadcast_queue")
+            .update({ sent_at: new Date().toISOString() })
+            .eq("id", row.id);
+        },
+      });
 
       await supabase
         .from("whatsapp_broadcast_queue")
