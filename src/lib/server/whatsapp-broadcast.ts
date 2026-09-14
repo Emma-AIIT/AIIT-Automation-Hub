@@ -27,10 +27,10 @@ import { sendAlertEmail } from "~/lib/server/alerts";
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
-/** Storage bucket holding broadcast images. Images are kept after the broadcast
+/** Storage bucket holding broadcast attachments. Files are kept after the broadcast
  *  finishes (not just staged between the accepting request and the cron ticks
- *  that send it) so a past broadcast's message and image can be reused from
- *  Broadcast History - see whatsapp.getBroadcastImageUrl. */
+ *  that send it) so a past broadcast's message and attachments can be reused from
+ *  Broadcast History - see whatsapp.getBroadcastImageUrls. */
 export const BROADCAST_BUCKET = "whatsapp-broadcasts";
 
 /** Minutes between groups. The ban-avoidance interval - override per environment
@@ -68,43 +68,67 @@ type BroadcastLogRow = {
   id: string;
   account_id: string;
   message: string | null;
-  image_path: string | null;
-  file_name: string | null;
+  image_paths: string[] | null;
+  file_names: string[] | null;
   group_names: string[];
   status: string;
 };
 
 export type BroadcastFile = { blob: Blob; name: string };
 
-/** Posts one group's message to Make.com. Throws on timeout or any non-2xx. */
+/**
+ * Posts one group's message to Make.com. Throws on timeout or any non-2xx.
+ *
+ * WhatsApp has no multi-attachment message, so when there is more than one file
+ * this sends one request per file, in order - the text (if any) rides along with
+ * the first one. A failure partway through throws immediately, leaving the
+ * remaining files unsent for this attempt.
+ *
+ * NOTE on retries: the caller retries the whole group on a retryable error (see
+ * drainBroadcastQueue), which resends every file from the top - including any
+ * that already went out before the failing one. This mirrors the existing
+ * timeout/duplicate tradeoff documented in describeSendError below; per-file
+ * retry would need a queue row per file, which is more machinery than a broadcast
+ * attachment list currently warrants.
+ */
 export async function sendToGroup(opts: {
   webhookUrl: string;
   chatId: string;
   message: string | null;
-  file: BroadcastFile | null;
+  files: BroadcastFile[];
 }): Promise<void> {
-  const { webhookUrl, chatId, message, file } = opts;
-  const signal = AbortSignal.timeout(SEND_TIMEOUT_MS);
+  const { webhookUrl, chatId, message, files } = opts;
 
-  let res: Response;
-  if (file) {
-    const form = new FormData();
-    form.append("chatId", chatId);
-    if (message) form.append("message", message);
-    form.append("file", file.blob, file.name);
-    res = await fetch(webhookUrl, { method: "POST", body: form, signal });
-  } else {
-    res = await fetch(webhookUrl, {
+  if (files.length === 0) {
+    const signal = AbortSignal.timeout(SEND_TIMEOUT_MS);
+    const res = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chatId, message }),
       signal,
     });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Make.com webhook returned ${res.status}`);
+    }
+    return;
   }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `Make.com webhook returned ${res.status}`);
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]!;
+    const signal = AbortSignal.timeout(SEND_TIMEOUT_MS);
+    const form = new FormData();
+    form.append("chatId", chatId);
+    if (i === 0 && message) form.append("message", message);
+    form.append("file", file.blob, file.name);
+    const res = await fetch(webhookUrl, { method: "POST", body: form, signal });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        (text || `Make.com webhook returned ${res.status}`) +
+          (files.length > 1 ? ` (attachment ${i + 1} of ${files.length})` : ""),
+      );
+    }
   }
 }
 
@@ -135,17 +159,24 @@ export function intervalMs(minutes?: number | null): number {
   return (minutes ?? BROADCAST_INTERVAL_MINUTES) * 60_000;
 }
 
-/** Fetches the staged image for a broadcast, or null when it is text-only. */
-async function loadImage(
+/** Fetches every staged attachment for a broadcast, or [] when it is text-only. */
+async function loadImages(
   supabase: SupabaseAdmin,
   log: BroadcastLogRow,
-): Promise<BroadcastFile | null> {
-  if (!log.image_path) return null;
-  const { data, error } = await supabase.storage.from(BROADCAST_BUCKET).download(log.image_path);
-  if (error || !data) {
-    throw new Error(`Broadcast image missing from storage: ${error?.message ?? "not found"}`);
+): Promise<BroadcastFile[]> {
+  const paths = log.image_paths ?? [];
+  if (paths.length === 0) return [];
+
+  const files: BroadcastFile[] = [];
+  for (let i = 0; i < paths.length; i++) {
+    const path = paths[i]!;
+    const { data, error } = await supabase.storage.from(BROADCAST_BUCKET).download(path);
+    if (error || !data) {
+      throw new Error(`Broadcast attachment missing from storage: ${error?.message ?? "not found"}`);
+    }
+    files.push({ blob: data, name: log.file_names?.[i] ?? "image" });
   }
-  return { blob: data, name: log.file_name ?? "image" };
+  return files;
 }
 
 /**
@@ -199,7 +230,7 @@ async function refreshBroadcast(supabase: SupabaseAdmin, broadcastId: string): P
 
   const { data: log } = await supabase
     .from("whatsapp_broadcast_log")
-    .select("id, account_id, message, image_path, file_name, group_names, status")
+    .select("id, account_id, message, image_paths, file_names, group_names, status")
     .eq("id", broadcastId)
     .single();
 
@@ -280,7 +311,7 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
 
   const nowIso = new Date().toISOString();
 
-  const { data: dueRows, error: dueError } = await supabase
+  const { data: dueRowsRaw, error: dueError } = await supabase
     .from("whatsapp_broadcast_queue")
     .select("id, broadcast_id, account_id, chat_id, group_name, position, attempts")
     .eq("status", "pending")
@@ -292,12 +323,26 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
     console.error("[whatsapp-broadcast] could not read queue:", dueError.message);
     return { sent: 0, pending: 0, waiting: [] };
   }
-  if (!dueRows || dueRows.length === 0) return { sent: 0, pending: 0, waiting: [] };
+  if (!dueRowsRaw || dueRowsRaw.length === 0) return { sent: 0, pending: 0, waiting: [] };
+
+  // Broadcasts paused from the dashboard are skipped entirely here - not claimed,
+  // no attempt consumed - so resuming later continues from exactly this point
+  // instead of restarting or losing a group.
+  const dueBroadcastIds = [...new Set((dueRowsRaw as BroadcastQueueRow[]).map((r) => r.broadcast_id))];
+  const { data: pausedLogs } = await supabase
+    .from("whatsapp_broadcast_log")
+    .select("id")
+    .in("id", dueBroadcastIds)
+    .eq("paused", true);
+  const pausedIds = new Set((pausedLogs ?? []).map((r) => (r as { id: string }).id));
+
+  const dueRows = (dueRowsRaw as BroadcastQueueRow[]).filter((r) => !pausedIds.has(r.broadcast_id));
+  if (dueRows.length === 0) return { sent: 0, pending: 0, waiting: [] };
 
   // One group per account per tick, oldest first. dueRows is already ordered, so the
   // first row seen for an account is the one to send.
   const nextPerAccount = new Map<string, BroadcastQueueRow>();
-  for (const row of dueRows as BroadcastQueueRow[]) {
+  for (const row of dueRows) {
     if (!nextPerAccount.has(row.account_id)) nextPerAccount.set(row.account_id, row);
   }
 
@@ -342,7 +387,7 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
 
     const { data: logData, error: logError } = await supabase
       .from("whatsapp_broadcast_log")
-      .select("id, account_id, message, image_path, file_name, group_names, status")
+      .select("id, account_id, message, image_paths, file_names, group_names, status")
       .eq("id", row.broadcast_id)
       .single();
 
@@ -370,8 +415,8 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
 
     try {
       const webhookUrl = getWebhookUrl(accountId as WhatsAppAccountId, "sendMessage");
-      const file = await loadImage(supabase, log);
-      await sendToGroup({ webhookUrl, chatId: row.chat_id, message: log.message, file });
+      const files = await loadImages(supabase, log);
+      await sendToGroup({ webhookUrl, chatId: row.chat_id, message: log.message, files });
 
       await supabase
         .from("whatsapp_broadcast_queue")
@@ -433,12 +478,12 @@ export async function enqueueBroadcast(
     message: string | null;
     groupIds: string[];
     groupNames: string[];
-    fileName?: string | null;
-    imagePath?: string | null;
+    fileNames?: string[] | null;
+    imagePaths?: string[] | null;
     queuedAt?: Date;
   },
 ): Promise<{ broadcastId: string; finishesAt: Date }> {
-  const { accountId, message, groupIds, groupNames, fileName, imagePath } = opts;
+  const { accountId, message, groupIds, groupNames, fileNames, imagePaths } = opts;
   const queuedAt = opts.queuedAt ?? new Date();
 
   const { data: inserted, error: insertError } = await supabase
@@ -448,9 +493,9 @@ export async function enqueueBroadcast(
       message,
       group_ids: groupIds,
       group_names: groupNames,
-      has_file: !!imagePath,
-      file_name: fileName ?? null,
-      image_path: imagePath ?? null,
+      has_file: (imagePaths?.length ?? 0) > 0,
+      file_names: fileNames ?? null,
+      image_paths: imagePaths ?? null,
       interval_minutes: BROADCAST_INTERVAL_MINUTES,
       status: "queued",
       sent_count: 0,
@@ -493,6 +538,30 @@ export async function enqueueBroadcast(
     broadcastId,
     finishesAt: new Date(queuedAt.getTime() + (groupIds.length - 1) * intervalMs()),
   };
+}
+
+/**
+ * Freezes a broadcast's remaining groups in place. drainBroadcastQueue skips its
+ * pending rows entirely while paused (see there) - nothing is claimed, no attempt
+ * is consumed, send_after is untouched - so resumeBroadcast picks up from exactly
+ * the next group waiting rather than restarting or skipping any. Groups already
+ * sent, and any mid-flight "sending" row, are unaffected.
+ */
+export async function pauseBroadcast(supabase: SupabaseAdmin, broadcastId: string): Promise<void> {
+  const { error } = await supabase
+    .from("whatsapp_broadcast_log")
+    .update({ paused: true })
+    .eq("id", broadcastId);
+  if (error) throw new Error(error.message);
+}
+
+/** Lets a paused broadcast's remaining groups resume normal pacing. */
+export async function resumeBroadcast(supabase: SupabaseAdmin, broadcastId: string): Promise<void> {
+  const { error } = await supabase
+    .from("whatsapp_broadcast_log")
+    .update({ paused: false })
+    .eq("id", broadcastId);
+  if (error) throw new Error(error.message);
 }
 
 /** Stops the groups that have not gone out yet. Already-sent groups stay sent. */

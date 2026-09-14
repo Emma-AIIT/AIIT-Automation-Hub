@@ -35,7 +35,10 @@ type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 const EMPTY_SEND_RESULTS = new Map<string, SendStatus>();
 
 const MAX_CHARS = 1000;
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+const MAX_ATTACHMENTS = 10; // mirrors MAX_ATTACHMENTS_PER_BROADCAST in /api/whatsapp/broadcast
+
+type Attachment = { file: File; preview: string };
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -46,8 +49,7 @@ function formatFileSize(bytes: number): string {
 export default function WhatsAppBroadcastPage() {
   const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [message, setMessage] = useState('');
-  const [image, setImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSending, setIsSending] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
@@ -60,8 +62,7 @@ export default function WhatsAppBroadcastPage() {
   const handleAccountSwitch = useCallback((id: WhatsAppAccountId) => {
     setActiveAccount(id);
     setMessage('');
-    setImage(null);
-    setImagePreview(null);
+    setAttachments([]);
     setSelectedIds(new Set());
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
@@ -116,25 +117,44 @@ export default function WhatsAppBroadcastPage() {
   }, [syncMutation, activeAccount]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    if (!file) return;
+    const chosen = Array.from(e.target.files ?? []);
+    e.target.value = ''; // allow re-selecting the same file(s) later
+    if (chosen.length === 0) return;
 
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error('Image must be under 10MB');
-      e.target.value = '';
-      return;
-    }
+    setAttachments((prev) => {
+      const room = MAX_ATTACHMENTS - prev.length;
+      if (room <= 0) {
+        toast.error(`Only ${MAX_ATTACHMENTS} attachments are allowed per broadcast`);
+        return prev;
+      }
 
-    setImage(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+      const oversized = chosen.find((f) => f.size > MAX_FILE_SIZE);
+      if (oversized) {
+        toast.error(`"${oversized.name}" is over 10MB`);
+      }
+
+      const accepted = chosen.filter((f) => f.size <= MAX_FILE_SIZE).slice(0, room);
+      if (chosen.length > room) {
+        toast.error(`Only ${MAX_ATTACHMENTS} attachments are allowed — ${accepted.length} added`);
+      }
+
+      accepted.forEach((file) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const preview = ev.target?.result as string;
+          setAttachments((current) =>
+            current.map((a) => (a.file === file ? { ...a, preview } : a)),
+          );
+        };
+        reader.readAsDataURL(file);
+      });
+
+      return [...prev, ...accepted.map((file) => ({ file, preview: '' }))];
+    });
   }, []);
 
-  const handleClearImage = useCallback(() => {
-    setImage(null);
-    setImagePreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const handleRemoveAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   // "Reuse" from Broadcast History - loads a past (or still in-flight) broadcast's
@@ -143,8 +163,7 @@ export default function WhatsAppBroadcastPage() {
   // rather than restored: the whole point is picking groups again.
   const handleReuseBroadcast = useCallback(async (entry: BroadcastLogEntry) => {
     setMessage(entry.message ?? '');
-    setImage(null);
-    setImagePreview(null);
+    setAttachments([]);
     setSelectedIds(new Set());
     if (fileInputRef.current) fileInputRef.current.value = '';
 
@@ -155,26 +174,37 @@ export default function WhatsAppBroadcastPage() {
 
     setIsLoadingReuseImage(true);
     try {
-      const { url, fileName } = await utils.whatsapp.getBroadcastImageUrl.fetch({
+      const { files: remoteFiles } = await utils.whatsapp.getBroadcastImageUrls.fetch({
         accountId: activeAccount,
         broadcastId: entry.id,
       });
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Could not download the image');
-      const blob = await res.blob();
-      const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
 
-      setImage(file);
-      const reader = new FileReader();
-      reader.onload = (ev) => setImagePreview(ev.target?.result as string);
-      reader.readAsDataURL(file);
+      const loaded = await Promise.all(
+        remoteFiles.map(async ({ url, fileName }) => {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`Could not download "${fileName}"`);
+          const blob = await res.blob();
+          const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
+          const preview: string = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => resolve(ev.target?.result as string);
+            reader.readAsDataURL(file);
+          });
+          return { file, preview };
+        }),
+      );
 
-      toast.success('Message and image loaded — choose groups and send.');
+      setAttachments(loaded);
+      toast.success(
+        remoteFiles.length === 1
+          ? 'Message and image loaded — choose groups and send.'
+          : `Message and ${remoteFiles.length} attachments loaded — choose groups and send.`,
+      );
     } catch (err) {
       toast.error(
         err instanceof Error
-          ? `Loaded the message, but the image could not be restored: ${err.message}`
-          : 'Loaded the message, but the image could not be restored.',
+          ? `Loaded the message, but attachments could not be restored: ${err.message}`
+          : 'Loaded the message, but attachments could not be restored.',
       );
     } finally {
       setIsLoadingReuseImage(false);
@@ -187,7 +217,7 @@ export default function WhatsAppBroadcastPage() {
   // and the tab can safely be closed.
   const handleSend = useCallback(async () => {
     const hasMessage = message.trim().length > 0;
-    const hasImage = image !== null;
+    const hasImage = attachments.length > 0;
     if ((!hasMessage && !hasImage) || selectedIds.size === 0 || isSending) return;
 
     setIsSending(true);
@@ -200,7 +230,7 @@ export default function WhatsAppBroadcastPage() {
       formData.append('groupIds', JSON.stringify(ids));
       formData.append('groupNames', JSON.stringify(names));
       if (hasMessage) formData.append('message', message.trim());
-      if (image) formData.append('file', image, image.name);
+      attachments.forEach(({ file }) => formData.append('file', file, file.name));
 
       const res = await fetch('/api/whatsapp/broadcast', { method: 'POST', body: formData });
       const json = await res.json().catch(() => ({})) as {
@@ -212,8 +242,7 @@ export default function WhatsAppBroadcastPage() {
 
       // Accepted — clear the composer so the next broadcast can be queued right away
       setMessage('');
-      setImage(null);
-      setImagePreview(null);
+      setAttachments([]);
       setSelectedIds(new Set());
       if (fileInputRef.current) fileInputRef.current.value = '';
       setBroadcastHistoryBump((n) => n + 1);
@@ -239,14 +268,14 @@ export default function WhatsAppBroadcastPage() {
     } finally {
       setIsSending(false);
     }
-  }, [message, image, selectedIds, isSending, activeAccount, groups]);
+  }, [message, attachments, selectedIds, isSending, activeAccount, groups]);
 
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
 
   const canSend =
-    (message.trim().length > 0 || image !== null) &&
+    (message.trim().length > 0 || attachments.length > 0) &&
     selectedIds.size > 0 &&
     !isSending &&
     !isLoadingReuseImage;
@@ -323,7 +352,7 @@ export default function WhatsAppBroadcastPage() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value.slice(0, MAX_CHARS))}
                 placeholder="Type your message here... (optional if sending an image)"
-                rows={image ? 6 : 10}
+                rows={attachments.length > 0 ? 6 : 10}
                 className="w-full resize-none rounded-lg border border-(--color-border-default) bg-white px-4 py-3 text-sm text-(--color-text-primary) placeholder:text-(--color-text-faint) focus:outline-none focus:border-(--color-accent-primary) focus:ring-2 focus:ring-(--color-accent-primary)/10 transition leading-relaxed"
               />
               <div className={`absolute bottom-3 right-3 text-xs tabular-nums ${charCountColor}`}>
@@ -331,60 +360,85 @@ export default function WhatsAppBroadcastPage() {
               </div>
             </div>
 
-            {/* Image attachment */}
+            {/* Attachments */}
             {isLoadingReuseImage ? (
               <div className="flex items-center gap-2.5 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)">
                 <svg className="animate-spin text-(--color-text-muted)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                 </svg>
-                <span className="text-xs text-(--color-text-muted)">Loading image from history...</span>
-              </div>
-            ) : image && imagePreview ? (
-              <div className="flex items-center gap-3 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)">
-                <Image
-                  src={imagePreview}
-                  alt="Attachment preview"
-                  width={56}
-                  height={56}
-                  className="w-14 h-14 rounded-md object-cover border border-(--color-border-subtle) shrink-0"
-                  unoptimized
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-(--color-text-primary) truncate">{image.name}</p>
-                  <p className="text-xs text-(--color-text-muted) mt-0.5">{formatFileSize(image.size)}</p>
-                </div>
-                <button
-                  onClick={handleClearImage}
-                  title="Remove image"
-                  className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-(--color-text-muted) hover:text-red-500 hover:bg-red-50 transition"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
+                <span className="text-xs text-(--color-text-muted)">Loading attachments from history...</span>
               </div>
             ) : (
-              <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-dashed border-(--color-border-default) hover:border-[#25D366] hover:bg-[#25D366]/5 cursor-pointer transition-all group">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageSelect}
-                  className="hidden"
-                />
-                <svg
-                  width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                  className="text-(--color-text-muted) group-hover:text-[#25D366] transition shrink-0"
-                >
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
-                </svg>
-                <span className="text-xs text-(--color-text-muted) group-hover:text-[#25D366] transition">
-                  Attach image <span className="text-(--color-text-faint)">— optional, max 10MB</span>
-                </span>
-              </label>
+              <>
+                {attachments.length > 0 && (
+                  <ul className="space-y-2">
+                    {attachments.map((att, i) => (
+                      <li
+                        key={`${att.file.name}-${i}`}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-(--color-border-default) bg-(--color-bg-secondary)"
+                      >
+                        {att.preview ? (
+                          <Image
+                            src={att.preview}
+                            alt="Attachment preview"
+                            width={56}
+                            height={56}
+                            className="w-14 h-14 rounded-md object-cover border border-(--color-border-subtle) shrink-0"
+                            unoptimized
+                          />
+                        ) : (
+                          <div className="w-14 h-14 rounded-md border border-(--color-border-subtle) shrink-0 flex items-center justify-center bg-white">
+                            <svg className="animate-spin text-(--color-text-faint)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                            </svg>
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-(--color-text-primary) truncate">{att.file.name}</p>
+                          <p className="text-xs text-(--color-text-muted) mt-0.5">{formatFileSize(att.file.size)}</p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveAttachment(i)}
+                          title="Remove attachment"
+                          className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-(--color-text-muted) hover:text-red-500 hover:bg-red-50 transition"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {attachments.length < MAX_ATTACHMENTS && (
+                  <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-dashed border-(--color-border-default) hover:border-[#25D366] hover:bg-[#25D366]/5 cursor-pointer transition-all group">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleImageSelect}
+                      className="hidden"
+                    />
+                    <svg
+                      width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      className="text-(--color-text-muted) group-hover:text-[#25D366] transition shrink-0"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    <span className="text-xs text-(--color-text-muted) group-hover:text-[#25D366] transition">
+                      {attachments.length > 0 ? 'Add another image' : 'Attach image(s)'}{' '}
+                      <span className="text-(--color-text-faint)">
+                        — optional, max 10MB each, up to {MAX_ATTACHMENTS}
+                      </span>
+                    </span>
+                  </label>
+                )}
+              </>
             )}
 
             {/* Send buttons row */}

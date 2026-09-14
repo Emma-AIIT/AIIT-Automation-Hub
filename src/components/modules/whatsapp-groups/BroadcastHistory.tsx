@@ -69,11 +69,13 @@ function GroupStatusList({
   broadcastId,
   fallbackNames,
   isActive,
+  paused,
 }: {
   accountId: WhatsAppAccountId;
   broadcastId: string;
   fallbackNames: string[];
   isActive: boolean;
+  paused: boolean;
 }) {
   const { data, isLoading } = api.whatsapp.getBroadcastGroupStatus.useQuery(
     { accountId, broadcastId },
@@ -111,7 +113,9 @@ function GroupStatusList({
         if ((g.status === 'sent' || g.status === 'failed') && g.sent_at) {
           detail = formatSydneyShortTime(g.sent_at);
         } else if (g.status === 'pending') {
-          detail = formatCountdown(g.send_after);
+          // A stale countdown while paused would read as still counting down when
+          // it is not - the row genuinely is not progressing until resumed.
+          detail = paused ? 'paused' : formatCountdown(g.send_after);
         }
         return (
           <li
@@ -165,6 +169,25 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
           ? 'Nothing left to stop — every group had already been sent'
           : `Stopped — ${res.cancelled} group${res.cancelled === 1 ? '' : 's'} will not be sent`,
       );
+      void refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Freezes/resumes a broadcast in place - unlike Stop, this is not terminal.
+  // Useful for holding a long paced send off an account's Make.com timeline
+  // temporarily (e.g. to test something else) without losing its place in the queue.
+  const pauseMutation = api.whatsapp.pauseBroadcast.useMutation({
+    onSuccess: () => {
+      toast.success('Paused — remaining groups are frozen until you resume');
+      void refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const resumeMutation = api.whatsapp.resumeBroadcast.useMutation({
+    onSuccess: () => {
+      toast.success('Resumed — continuing from the next group waiting');
       void refetch();
     },
     onError: (err) => toast.error(err.message),
@@ -280,7 +303,9 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                             <circle cx="8.5" cy="8.5" r="1.5" />
                             <polyline points="21 15 16 10 5 21" />
                           </svg>
-                          {entry.file_name ?? 'Image'}
+                          {entry.file_names && entry.file_names.length > 1
+                            ? `${entry.file_names.length} images`
+                            : entry.file_names?.[0] ?? entry.file_name ?? 'Image'}
                         </span>
                       )}
                       {preview ? (
@@ -317,13 +342,38 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                           <span className="text-xs text-(--color-text-muted)">
                             {entry.sent_count} of {entry.group_ids.length} sent
                           </span>
-                          {entry.next_send_at && (
+                          {entry.paused ? (
                             <>
                               <span className="text-xs text-(--color-text-faint)">·</span>
-                              <span className="text-xs text-(--color-text-muted)">
-                                next {formatCountdown(entry.next_send_at)}
-                              </span>
+                              <span className="text-xs font-medium text-amber-600">Paused</span>
                             </>
+                          ) : (
+                            entry.next_send_at && (
+                              <>
+                                <span className="text-xs text-(--color-text-faint)">·</span>
+                                <span className="text-xs text-(--color-text-muted)">
+                                  next {formatCountdown(entry.next_send_at)}
+                                </span>
+                              </>
+                            )
+                          )}
+                          <span className="text-xs text-(--color-text-faint)">·</span>
+                          {entry.paused ? (
+                            <button
+                              onClick={() => resumeMutation.mutate({ broadcastId: entry.id })}
+                              disabled={resumeMutation.isPending}
+                              className="text-xs text-[#1a9e4e] hover:text-[#158040] hover:underline transition disabled:opacity-40"
+                            >
+                              Resume
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => pauseMutation.mutate({ broadcastId: entry.id })}
+                              disabled={pauseMutation.isPending}
+                              className="text-xs text-(--color-text-muted) hover:text-(--color-text-primary) hover:underline transition disabled:opacity-40"
+                            >
+                              Pause
+                            </button>
                           )}
                           <span className="text-xs text-(--color-text-faint)">·</span>
                           <button
@@ -380,6 +430,7 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                           broadcastId={entry.id}
                           fallbackNames={entry.group_names}
                           isActive={isActive}
+                          paused={entry.paused}
                         />
                       </div>
                     )}
@@ -401,8 +452,12 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                     <span className="text-[11px] text-(--color-text-faint)">
                       {entry.group_ids.length} {entry.group_ids.length === 1 ? 'group' : 'groups'}
                     </span>
-                    <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${style.badge}`}>
-                      {style.label}
+                    <span
+                      className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                        entry.paused ? 'bg-amber-50 text-amber-600 border-amber-200' : style.badge
+                      }`}
+                    >
+                      {entry.paused ? 'Paused' : style.label}
                     </span>
                     <button
                       onClick={() => onReuse(entry)}

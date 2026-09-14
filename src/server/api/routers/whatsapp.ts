@@ -24,7 +24,12 @@ import { createAdminClient } from "~/lib/supabase/admin";
 import { WHATSAPP_ACCOUNTS, getWebhookUrl } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
-import { cancelBroadcast as cancelBroadcastQueue, BROADCAST_BUCKET } from "~/lib/server/whatsapp-broadcast";
+import {
+  cancelBroadcast as cancelBroadcastQueue,
+  pauseBroadcast as pauseBroadcastQueue,
+  resumeBroadcast as resumeBroadcastQueue,
+  BROADCAST_BUCKET,
+} from "~/lib/server/whatsapp-broadcast";
 
 const accountIdSchema = z.enum(
   WHATSAPP_ACCOUNTS.map((a) => a.id) as [WhatsAppAccountId, ...WhatsAppAccountId[]]
@@ -54,7 +59,12 @@ export interface BroadcastLogEntry {
   group_names: string[];
   has_file: boolean;
   file_name: string | null;
+  /** One entry per attachment, in send order. Null/empty on text-only broadcasts. */
+  file_names: string[] | null;
   status: "queued" | "sending" | "sent" | "failed" | "partial" | "not_sent" | "cancelled";
+  /** True while frozen from the dashboard - drainBroadcastQueue skips its due
+   *  groups until resumed. Orthogonal to status, which stays queued/sending. */
+  paused: boolean;
   make_error: string | null;
   sent_count: number;
   failed_count: number;
@@ -369,38 +379,44 @@ export const whatsappRouter = createTRPCRouter({
     }),
 
   /**
-   * Signed URL for a past broadcast's staged image, so "reuse this message" in
-   * Broadcast History can pull the image back into the composer. The bucket is
-   * private (service role only), so the path itself is never sent to the client -
-   * only a short-lived signed URL, fetched fresh each time it's needed.
+   * Signed URLs for a past broadcast's staged attachments, so "reuse this message"
+   * in Broadcast History can pull them back into the composer. The bucket is
+   * private (service role only), so paths are never sent to the client - only
+   * short-lived signed URLs, fetched fresh each time they're needed.
    */
-  getBroadcastImageUrl: publicProcedure
+  getBroadcastImageUrls: publicProcedure
     .input(z.object({ accountId: accountIdSchema, broadcastId: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ input }): Promise<{ files: { url: string; fileName: string }[] }> => {
       const supabase = createAdminClient();
       const { data, error } = await supabase
         .from("whatsapp_broadcast_log")
-        .select("image_path, file_name")
+        .select("image_paths, file_names")
         .eq("id", input.broadcastId)
         .eq("account_id", input.accountId)
         .single();
 
-      const row = data as { image_path: string | null; file_name: string | null } | null;
-      if (error || !row?.image_path) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "This broadcast has no image" });
+      const row = data as { image_paths: string[] | null; file_names: string[] | null } | null;
+      const paths = row?.image_paths ?? [];
+      if (error || paths.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "This broadcast has no attachments" });
       }
 
-      const { data: signed, error: signError } = await supabase.storage
-        .from(BROADCAST_BUCKET)
-        .createSignedUrl(row.image_path, 60);
-      if (signError || !signed) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: signError?.message ?? "Could not sign the image URL",
-        });
-      }
+      const files = await Promise.all(
+        paths.map(async (path, i) => {
+          const { data: signed, error: signError } = await supabase.storage
+            .from(BROADCAST_BUCKET)
+            .createSignedUrl(path, 60);
+          if (signError || !signed) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: signError?.message ?? "Could not sign an attachment URL",
+            });
+          }
+          return { url: signed.signedUrl, fileName: row?.file_names?.[i] ?? "image" };
+        }),
+      );
 
-      return { url: signed.signedUrl, fileName: row.file_name ?? "image" };
+      return { files };
     }),
 
   /**
@@ -418,6 +434,42 @@ export const whatsappRouter = createTRPCRouter({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: err instanceof Error ? err.message : "Could not cancel the broadcast",
+        });
+      }
+    }),
+
+  /**
+   * Freezes a broadcast in place - unlike cancelBroadcast this is not terminal.
+   * Remaining groups just sit untouched in the queue until resumeBroadcast is
+   * called, so pausing to test something else against the same account does not
+   * lose progress or restart the broadcast.
+   */
+  pauseBroadcast: publicProcedure
+    .input(z.object({ broadcastId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      try {
+        await pauseBroadcastQueue(supabase, input.broadcastId);
+        return { success: true };
+      } catch (err) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err instanceof Error ? err.message : "Could not pause the broadcast",
+        });
+      }
+    }),
+
+  resumeBroadcast: publicProcedure
+    .input(z.object({ broadcastId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      try {
+        await resumeBroadcastQueue(supabase, input.broadcastId);
+        return { success: true };
+      } catch (err) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err instanceof Error ? err.message : "Could not resume the broadcast",
         });
       }
     }),

@@ -2,8 +2,10 @@
  * POST /api/whatsapp/broadcast
  *
  * Accepts one multipart/form-data request describing a whole broadcast (accountId,
- * message?, groupIds JSON array, groupNames JSON array, optional image file) and
- * *enqueues* it. Nothing is sent here.
+ * message?, groupIds JSON array, groupNames JSON array, zero or more "file" entries)
+ * and *enqueues* it. Nothing is sent here. WhatsApp has no multi-attachment message,
+ * so each file is later sent to a group as its own message - see sendToGroup in
+ * src/lib/server/whatsapp-broadcast.ts.
  *
  * This route used to fan out to Make.com itself, in parallel batches of 8. That
  * made every group land within a minute of every other, because the 15 minute gap
@@ -36,6 +38,11 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB - Make.com webhook limit
 /** Guard against a mis-click queueing a send that would run for weeks. At the
  *  default interval this is a little over two days of sending. */
 const MAX_GROUPS_PER_BROADCAST = 200;
+
+/** Each attachment goes out to a group as its own message (see sendToGroup), so a
+ *  large batch turns one broadcast into that many messages per group in a row.
+ *  Capped well short of anything that would look like spam to a recipient. */
+const MAX_ATTACHMENTS_PER_BROADCAST = 10;
 
 export async function POST(req: NextRequest) {
   try {
@@ -82,17 +89,20 @@ export async function POST(req: NextRequest) {
     const message =
       typeof messageRaw === "string" && messageRaw.trim() ? messageRaw.trim() : null;
 
-    const fileRaw = formData.get("file");
-    let file: File | null = null;
-    if (fileRaw instanceof File) {
-      if (fileRaw.size > MAX_FILE_SIZE) {
-        return NextResponse.json({ error: "File exceeds 10MB limit" }, { status: 413 });
-      }
-      file = fileRaw;
+    const files = formData.getAll("file").filter((f): f is File => f instanceof File);
+    if (files.length > MAX_ATTACHMENTS_PER_BROADCAST) {
+      return NextResponse.json(
+        { error: `At most ${MAX_ATTACHMENTS_PER_BROADCAST} attachments are allowed per broadcast` },
+        { status: 400 },
+      );
+    }
+    const oversized = files.find((f) => f.size > MAX_FILE_SIZE);
+    if (oversized) {
+      return NextResponse.json({ error: `"${oversized.name}" exceeds the 10MB limit` }, { status: 413 });
     }
 
-    if (!message && !file) {
-      return NextResponse.json({ error: "A message or image is required" }, { status: 400 });
+    if (!message && files.length === 0) {
+      return NextResponse.json({ error: "A message or an attachment is required" }, { status: 400 });
     }
 
     // Fail fast if this account's send webhook isn't configured - better here than
@@ -108,26 +118,30 @@ export async function POST(req: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // Stage the image before the log row exists, so a storage failure cannot leave
-    // a broadcast queued with an image it can never read.
-    let imagePath: string | null = null;
-    if (file) {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      imagePath = `${accountId}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+    // Stage every attachment before the log row exists, so a storage failure cannot
+    // leave a broadcast queued with a file it can never read.
+    const imagePaths: string[] = [];
+    const fileNames: string[] = [];
+    for (const f of files) {
+      const safeName = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${accountId}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
       const { error: uploadError } = await supabase.storage
         .from(BROADCAST_BUCKET)
-        .upload(imagePath, file, { contentType: file.type || "application/octet-stream" });
+        .upload(path, f, { contentType: f.type || "application/octet-stream" });
       if (uploadError) {
-        console.error("[whatsapp/broadcast] image upload failed:", uploadError.message);
+        console.error("[whatsapp/broadcast] attachment upload failed:", uploadError.message);
+        if (imagePaths.length > 0) await supabase.storage.from(BROADCAST_BUCKET).remove(imagePaths);
         return NextResponse.json(
           {
             error:
-              `Could not stage the image: ${uploadError.message}. ` +
+              `Could not stage "${f.name}": ${uploadError.message}. ` +
               `If this says the bucket is missing, run the broadcast pacing migration.`,
           },
           { status: 500 },
         );
       }
+      imagePaths.push(path);
+      fileNames.push(f.name);
     }
 
     let broadcastId: string;
@@ -138,11 +152,11 @@ export async function POST(req: NextRequest) {
         message,
         groupIds,
         groupNames,
-        fileName: file?.name ?? null,
-        imagePath,
+        fileNames,
+        imagePaths,
       }));
     } catch (err) {
-      if (imagePath) await supabase.storage.from(BROADCAST_BUCKET).remove([imagePath]);
+      if (imagePaths.length > 0) await supabase.storage.from(BROADCAST_BUCKET).remove(imagePaths);
       const detail = err instanceof Error ? err.message : "unknown error";
       console.error("[whatsapp/broadcast] enqueue failed:", detail);
       return NextResponse.json(
