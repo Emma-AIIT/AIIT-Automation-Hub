@@ -149,6 +149,8 @@ interface BroadcastHistoryProps {
 export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastHistoryProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  // TEMPORARY: confirmation state for the delete button - remove together with it.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [pollFast, setPollFast] = useState(false);
   const { data: history = [], isLoading, refetch } = api.whatsapp.listBroadcastHistory.useQuery(
@@ -198,9 +200,13 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
   const deleteMutation = api.whatsapp.deleteBroadcast.useMutation({
     onSuccess: () => {
       toast.success('Deleted');
+      setConfirmDeleteId(null);
       void refetch();
     },
-    onError: (err) => toast.error(err.message),
+    onError: (err) => {
+      toast.error(err.message);
+      setConfirmDeleteId(null);
+    },
   });
 
   // Refetch when parent signals a new broadcast was just queued
@@ -482,12 +488,7 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                     {/* TEMPORARY: for clearing test broadcasts - remove with deleteMutation */}
                     {!isActive && (
                       <button
-                        onClick={() => {
-                          if (confirm('Permanently delete this broadcast from history? This cannot be undone.')) {
-                            deleteMutation.mutate({ accountId, broadcastId: entry.id });
-                          }
-                        }}
-                        disabled={deleteMutation.isPending}
+                        onClick={() => setConfirmDeleteId(entry.id)}
                         title="Delete from history"
                         className="w-7 h-7 rounded-full flex items-center justify-center text-(--color-text-muted) hover:text-red-500 hover:bg-red-50 transition disabled:opacity-40"
                       >
@@ -504,6 +505,47 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
           })}
         </div>
       )}
+
+      {/* TEMPORARY: delete confirmation - remove together with the delete button */}
+      {confirmDeleteId && (() => {
+        const target = history.find((e) => e.id === confirmDeleteId);
+        return (
+          <>
+            <div
+              className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[1px]"
+              onClick={() => setConfirmDeleteId(null)}
+            />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-xl border border-(--color-border-subtle) w-full max-w-sm p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-(--color-text-primary)">Delete this broadcast?</h3>
+                  <p className="text-xs text-(--color-text-muted) mt-1.5 leading-relaxed">
+                    {target?.message
+                      ? `"${target.message.length > 80 ? target.message.slice(0, 80) + '…' : target.message}"`
+                      : 'This broadcast'}{' '}
+                    will be permanently removed from history, along with any attachments. This cannot be undone.
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="flex-1 py-2.5 rounded-lg border border-(--color-border-default) text-sm font-medium text-(--color-text-secondary) hover:bg-(--color-bg-hover) transition"
+                  >
+                    No, keep it
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate({ accountId, broadcastId: confirmDeleteId })}
+                    disabled={deleteMutation.isPending}
+                    className="flex-1 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 text-sm font-semibold text-white transition"
+                  >
+                    {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
