@@ -66,7 +66,7 @@ export const SUBSCRIPTIONS: Subscription[] = [
     renewsOn: '2026-10-23',
     cost: 24.2,
     currency: 'USD',
-    billingUrl: 'https://elevenlabs.io/app/settings/billing',
+    billingUrl: 'https://elevenlabs.io/app/subscription/creative',
     breaks: 'Voice for 31 of 32 Vapi assistants (Anna and Ali Boss voices). Every call fails with "voice-failed".',
     source: 'ElevenLabs API, checked 2026-10-12',
     live: 'elevenlabs',
