@@ -74,14 +74,14 @@ export const SUBSCRIPTIONS: Subscription[] = [
   {
     id: 'make',
     name: 'Make.com',
-    plan: 'Pro, 40,000 ops / month',
+    plan: 'Pro, 40,000 credits / month',
     cycle: 'monthly',
     renewsOn: '2026-11-12',
-    cost: null,
+    cost: 62.35,
     currency: 'USD',
     billingUrl: 'https://eu2.make.com/organization/2987012/subscription',
     breaks: 'All automations: Xero sync, tickets, quote pipeline, WhatsApp broadcasts, invoicing logs.',
-    source: 'make-cli organizations get, checked 2026-10-12',
+    source: 'make-cli organizations get + Make billing page (US$62.35/month), checked 2026-10-12',
     live: 'make',
   },
   {

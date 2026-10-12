@@ -22,7 +22,7 @@ const MAKE_ZONE = 'eu2.make.com';
 const MAKE_ORG_ID = 2987012;
 const VERCEL_TEAM_ID = 'team_gd1IHqajB0tgVPdSxXHkmeyM';
 
-/** Share of the monthly Make operations allowance that counts as "nearly out" */
+/** Share of the monthly Make credits allowance that counts as "nearly out" */
 const MAKE_OPS_WARNING = 0.9;
 
 class CheckError extends Error {}
@@ -103,9 +103,9 @@ async function checkMake(): Promise<LiveResult> {
 
   let problem: string | null = null;
   if (plan.toLowerCase() === 'free') {
-    problem = 'The Make plan has dropped to Free. Scenarios will stop once the free operations run out.';
+    problem = 'The Make plan has dropped to Free. Scenarios will stop once the free credits run out.';
   } else if (limit > 0 && used / limit >= MAKE_OPS_WARNING) {
-    problem = `Operations nearly used up (${Math.round((used / limit) * 100)}%). Scenarios stop when they run out.`;
+    problem = `Credits nearly used up (${Math.round((used / limit) * 100)}%). Scenarios stop when they run out.`;
   }
 
   return {
@@ -113,7 +113,7 @@ async function checkMake(): Promise<LiveResult> {
     problem,
     nextRenewal: org.nextReset ?? null,
     price: null,
-    detail: `${plan} plan · ${used.toLocaleString()} / ${limit.toLocaleString()} operations this month`,
+    detail: `${plan} plan · ${used.toLocaleString()} / ${limit.toLocaleString()} credits this month`,
   };
 }
 
