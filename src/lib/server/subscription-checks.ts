@@ -40,6 +40,10 @@ async function getJson<T>(url: string, headers: Record<string, string>): Promise
   return res.json() as Promise<T>;
 }
 
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function unixToIso(seconds: number | null | undefined): string | null {
   return seconds ? new Date(seconds * 1000).toISOString() : null;
 }
@@ -71,7 +75,7 @@ async function checkElevenLabs(): Promise<LiveResult> {
     checked: true,
     problem: healthy ? null : `Payment failed: ElevenLabs reports the account as "${sub.status ?? 'unknown'}". Voice calls will fail until it is paid.`,
     nextRenewal: unixToIso(sub.next_character_count_reset_unix),
-    detail: `${sub.tier ?? 'Unknown'} plan, ${sub.status ?? 'unknown'}${used}`,
+    detail: `${capitalize(sub.tier ?? 'unknown')} plan, ${sub.status ?? 'unknown'}${used}`,
     price: typeof cents === 'number' ? { amount: cents / 100, currency: (sub.currency ?? 'usd').toUpperCase() } : null,
   };
 }
@@ -135,7 +139,7 @@ async function checkVercel(): Promise<LiveResult> {
     problem,
     nextRenewal: period?.end ? new Date(period.end).toISOString() : null,
     price: null,
-    detail: `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan, ${status}`,
+    detail: `${capitalize(plan)} plan, ${status}`,
   };
 }
 
