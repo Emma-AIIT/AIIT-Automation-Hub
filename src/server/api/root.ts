@@ -21,6 +21,7 @@ import { whatsappRouter } from "~/server/api/routers/whatsapp";
 import { invoicingRouter } from "~/server/api/routers/invoicing";
 import { callContactsRouter } from "~/server/api/routers/callContacts";
 import { outboundCallsRouter } from "~/server/api/routers/outboundCalls";
+import { subscriptionsRouter } from "~/server/api/routers/subscriptions";
 import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 
 /**
@@ -42,6 +43,7 @@ export const appRouter = createTRPCRouter({
   invoicing: invoicingRouter,
   callContacts: callContactsRouter,
   outboundCalls: outboundCallsRouter,
+  subscriptions: subscriptionsRouter,
   search: searchRouter,
 });
 

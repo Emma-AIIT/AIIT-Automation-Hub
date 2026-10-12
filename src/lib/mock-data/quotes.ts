@@ -303,7 +303,7 @@ export interface SidebarModule {
   id: string;
   label: string;
   route: string;
-  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp" | "receipt" | "chat";
+  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp" | "receipt" | "chat" | "calendar";
   badge?: { count: number; color: "red" | "blue" };
   disabled?: boolean;
   comingSoon?: boolean;
@@ -369,5 +369,11 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
     label: "Invoicing Logs",
     route: "/automations/invoicing-logs",
     icon: "receipt",
+  },
+  {
+    id: "subscriptions",
+    label: "Subscriptions",
+    route: "/automations/subscriptions",
+    icon: "calendar",
   },
 ];

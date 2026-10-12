@@ -51,6 +51,11 @@ export const env = createEnv({
     // is the ban-avoidance interval - the Make.com scenario must not also sleep,
     // or the two delays stack.
     WHATSAPP_BROADCAST_INTERVAL_MINUTES: z.coerce.number().int().positive().optional(),
+    // Read-only billing checks on the Subscriptions page. Each is optional; a
+    // missing key just shows that service as "live check unavailable".
+    ELEVENLABS_API_KEY: z.string().min(1).optional(),
+    MAKE_API_KEY: z.string().min(1).optional(),
+    VERCEL_API_TOKEN: z.string().min(1).optional(),
   },
 
   client: {
@@ -102,6 +107,9 @@ export const env = createEnv({
     WHATSAPP_ALERT_EMAIL: process.env.WHATSAPP_ALERT_EMAIL,
     CRON_SECRET: process.env.CRON_SECRET,
     WHATSAPP_BROADCAST_INTERVAL_MINUTES: process.env.WHATSAPP_BROADCAST_INTERVAL_MINUTES,
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+    MAKE_API_KEY: process.env.MAKE_API_KEY,
+    VERCEL_API_TOKEN: process.env.VERCEL_API_TOKEN,
   },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

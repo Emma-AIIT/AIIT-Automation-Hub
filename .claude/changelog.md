@@ -47,6 +47,35 @@
 
 ## 📝 Changelog Entries
 
+### 2026-10-12 - Subscriptions page with live billing checks and renewal reminder
+
+**Why**: The Sep–Oct 2026 voice outage was an ElevenLabs card payment that failed
+silently and took 31 of 32 Vapi assistants down for three weeks. This page makes
+every paid dependency, its price and its renewal visible, and flags failed
+payments as soon as the hub is opened.
+
+**Added**:
+- `/automations/subscriptions` page and a "Subscriptions" sidebar entry
+  (new `calendar` icon). Shows each service's price, days to renewal, what
+  breaks if it lapses, a billing link, and a monthly total at the top.
+- `src/config/subscriptions.ts`: the list of services. One known renewal date
+  per plan; the page rolls it forward by billing cycle.
+- Live, read-only billing checks (`src/lib/server/subscription-checks.ts`,
+  `subscriptions.getLive` tRPC procedure) for ElevenLabs (status, renewal,
+  invoice amount), Make.com (plan, reset date, operations used), Vercel (plan
+  status, period end) and Twilio (balance). They run once per hub open, with no
+  timer or cache. A missing key or failed request falls back to the config dates.
+- `RenewalReminder` pop-up on every /automations page. It shows when a live
+  check finds a problem (failed payment, low balance, ops nearly used) or a
+  manually paid plan renews within 5 days. Auto-paid renewals show as a blue
+  heads-up on the page instead. Shown once per tab session.
+
+**Configuration**:
+- New optional env vars: `ELEVENLABS_API_KEY` (User: read), `MAKE_API_KEY`
+  (organizations:read), `VERCEL_API_TOKEN` (access to the "Emma's projects"
+  team). Twilio reuses the existing credentials. Vapi has no balance endpoint
+  for private keys, so it stays manual.
+
 ### 2026-09-07 - "Show status" available on every broadcast, with timestamps
 
 **Fixed**:
