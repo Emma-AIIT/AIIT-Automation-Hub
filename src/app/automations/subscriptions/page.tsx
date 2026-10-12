@@ -175,6 +175,9 @@ function SubscriptionRow({ renewal, liveLoading }: { renewal: Renewal; liveLoadi
         {live?.checked && live.detail && (
           <p className="text-xs text-[var(--color-text-muted)] mt-1">{live.detail}</p>
         )}
+        {live && !live.checked && (
+          <p className="text-xs text-[var(--color-text-faint)] mt-1">Live check off: {live.reason}</p>
+        )}
 
         <p className="text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed">
           <span className="font-medium">If it lapses:</span> {s.breaks}
@@ -189,7 +192,7 @@ function SubscriptionRow({ renewal, liveLoading }: { renewal: Renewal; liveLoadi
 
       {/* Price + countdown + billing link */}
       <div className="flex items-center gap-5 md:justify-end flex-shrink-0">
-        <div className="w-28 text-left md:text-right">
+        <div className="w-28 text-left md:text-right whitespace-nowrap">
           {s.cycle === 'free' ? (
             <p className="text-base font-bold text-[var(--color-text-secondary)]">Free</p>
           ) : s.cycle === 'prepaid' ? (
@@ -204,11 +207,11 @@ function SubscriptionRow({ renewal, liveLoading }: { renewal: Renewal; liveLoadi
           )}
         </div>
 
-        <div className="w-36 text-left md:text-right">
+        <div className="w-40 text-left md:text-right whitespace-nowrap">
           <CountdownPill status={status} daysLeft={daysLeft} pillClass={styles.pill} />
           <p className="text-xs text-[var(--color-text-muted)] mt-1">
             {nextDate
-              ? `Renews ${format(nextDate, 'EEE d MMM yyyy')}`
+              ? `${status === 'charging' ? 'Auto-pays' : 'Renews'} ${format(nextDate, 'EEE d MMM yyyy')}`
               : status === 'prepaid'
                 ? 'Stops when credit runs out'
                 : status === 'free'
@@ -243,14 +246,14 @@ function CountdownPill({
 }) {
   let label: string;
   if (status === 'problem') label = 'Action needed';
-  else if (daysLeft !== null && status === 'charging')
-    label = `Auto-pays ${daysLeft > 1 ? `in ${daysLeft} days` : formatDaysLeft(daysLeft).toLowerCase()}`;
   else if (daysLeft !== null) label = formatDaysLeft(daysLeft);
   else if (status === 'prepaid') label = 'Check balance';
   else if (status === 'free') label = 'Free plan';
   else label = 'Date needed';
 
-  return <span className={`inline-block text-sm font-bold px-3 py-1 rounded-full ${pillClass}`}>{label}</span>;
+  return (
+    <span className={`inline-block whitespace-nowrap text-sm font-bold px-3 py-1 rounded-full ${pillClass}`}>{label}</span>
+  );
 }
 
 function LiveBadge({ renewal, loading }: { renewal: Renewal; loading: boolean }) {
@@ -265,11 +268,8 @@ function LiveBadge({ renewal, loading }: { renewal: Renewal; loading: boolean })
     );
   }
   return (
-    <span
-      className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-500"
-      title={live && !live.checked ? live.reason : undefined}
-    >
-      Live check unavailable{live && !live.checked ? `: ${live.reason}` : ''}
+    <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+      Not live
     </span>
   );
 }
