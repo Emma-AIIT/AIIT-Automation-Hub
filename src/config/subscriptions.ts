@@ -123,15 +123,16 @@ export const SUBSCRIPTIONS: Subscription[] = [
   {
     id: 'vercel',
     name: 'Vercel',
-    plan: 'Pro (US$20 per seat, plus usage)',
+    plan: 'Pro (seats + usage, US$20 usage credit included)',
     cycle: 'monthly',
     renewsOn: '2026-10-13',
-    cost: null,
+    cost: 40,
     currency: 'USD',
     billingUrl: 'https://vercel.com/emmas-projects-4ac8e431/~/settings/billing',
     breaks: 'Hosting for this dashboard, its cron jobs and the Vapi webhooks.',
-    source: 'Vercel API (team "Emma\'s projects"), checked 2026-10-12',
-    live: 'vercel',
+    source: 'Vercel billing page (upcoming invoice US$40.00), checked 2026-10-12',
+    // No live check: Vercel tokens get 403 on team billing (/v2/teams/:id).
+    // checkVercel() is kept for if a token with billing access is added.
   },
   {
     id: 'xero',
