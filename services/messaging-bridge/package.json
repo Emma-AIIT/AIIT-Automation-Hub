@@ -1,0 +1,30 @@
+{
+  "name": "aiit-messaging-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Always-on bridge that lets the AIIT Hub list and post to Telegram (GramJS user account) and Signal (signal-cli-rest-api) groups.",
+  "type": "commonjs",
+  "main": "dist/src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test test/app.test.ts test/signal.test.ts test/telegram.test.ts",
+    "start": "node dist/src/server.js",
+    "dev": "tsx src/server.ts",
+    "telegram-login": "tsx scripts/telegram-login.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "big-integer": "^1.6.52",
+    "hono": "^4.6.14",
+    "telegram": "^2.26.16"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.30",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.2"
+  }
+}
