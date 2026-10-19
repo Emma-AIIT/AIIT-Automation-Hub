@@ -51,6 +51,14 @@ export const env = createEnv({
     TELEGRAM_BRIDGE_SEND_URL: z.string().url().optional(),
     SIGNAL_BRIDGE_SYNC_GROUPS_URL: z.string().url().optional(),
     SIGNAL_BRIDGE_SEND_URL: z.string().url().optional(),
+    // Telegram direct mode: the Hub logs in as Ali's own Telegram account with
+    // GramJS, no bridge server. api_id/api_hash come from my.telegram.org; the
+    // session string from `npm run telegram-login`. When all three are set they
+    // take precedence over the TELEGRAM_BRIDGE_* URLs. TELEGRAM_SESSION is a full
+    // login to the account: keep it secret and never log it.
+    TELEGRAM_API_ID: z.coerce.number().int().positive().optional(),
+    TELEGRAM_API_HASH: z.string().min(1).optional(),
+    TELEGRAM_SESSION: z.string().min(1).optional(),
     WHATSAPP_IMPORT_SECRET: z.string().min(1).optional(),
     WHATSAPP_ALERT_EMAIL: z.string().email().optional(),
     CRON_SECRET: z.string().min(1).optional(),
@@ -114,6 +122,9 @@ export const env = createEnv({
     TELEGRAM_BRIDGE_SEND_URL: process.env.TELEGRAM_BRIDGE_SEND_URL,
     SIGNAL_BRIDGE_SYNC_GROUPS_URL: process.env.SIGNAL_BRIDGE_SYNC_GROUPS_URL,
     SIGNAL_BRIDGE_SEND_URL: process.env.SIGNAL_BRIDGE_SEND_URL,
+    TELEGRAM_API_ID: process.env.TELEGRAM_API_ID,
+    TELEGRAM_API_HASH: process.env.TELEGRAM_API_HASH,
+    TELEGRAM_SESSION: process.env.TELEGRAM_SESSION,
     WHATSAPP_IMPORT_SECRET: process.env.WHATSAPP_IMPORT_SECRET,
     WHATSAPP_ALERT_EMAIL: process.env.WHATSAPP_ALERT_EMAIL,
     CRON_SECRET: process.env.CRON_SECRET,

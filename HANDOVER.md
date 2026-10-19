@@ -227,6 +227,16 @@ Full endpoint URLs of `services/messaging-bridge`, each including the bridge sec
 | `SIGNAL_BRIDGE_SYNC_GROUPS_URL` | Returns the Signal groups of the linked number (`signal-aiit`) |
 | `SIGNAL_BRIDGE_SEND_URL` | Sends one Signal group message |
 
+### Telegram (direct) — no bridge server
+
+All optional. When all three are set, `telegram-ali` uses them instead of the `TELEGRAM_BRIDGE_*` URLs. Setup steps: Section 5, WhatsApp Groups & Participants → "Telegram (direct)".
+
+| Variable | What it does |
+|----------|-------------|
+| `TELEGRAM_API_ID` | api_id from my.telegram.org (Ali's number) |
+| `TELEGRAM_API_HASH` | api_hash from my.telegram.org |
+| `TELEGRAM_SESSION` | GramJS session string from `npm run telegram-login`. Secret: a full login to Ali's account; add with `--sensitive`, never log it |
+
 ### VAPI
 
 | Variable | Description |
@@ -367,6 +377,26 @@ no serverless function lives that long.
 - **Refresh groups** → `POST {"trigger":"pull_groups"}` to the platform's sync URL → `{"synced": n, "groups": [{id, name}]}`. Unlike Make.com, the bridge does not write to Supabase: `whatsapp.syncGroups` upserts the groups into `whatsapp_groups` for that account and deletes the account's groups that were not returned.
 - **Sending** → the cron posts exactly what it posts to Make.com (`{chatId, message}` JSON, or multipart `chatId` + `message` + `file` per attachment, caption on the last) to the platform's send URL. A non-2xx with a plain-text body is the error shown in Broadcast History.
 - `whatsapp.getPlatforms` tells the page which platforms are configured. Participant sync and 1:1 participant messages stay WhatsApp-only.
+
+#### Telegram (direct)
+
+Telegram can also run **without the bridge or any server**: the Hub logs in as Ali's own account with GramJS (`src/lib/server/telegram.ts`) on every Refresh groups and every queued send, then disconnects. This is the current plan (no Oracle VM, no cPanel). Precedence for `telegram-ali` (`getTelegramMode()` in `whatsapp-accounts.ts`): if `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` and `TELEGRAM_SESSION` are all set → **direct**; else if both `TELEGRAM_BRIDGE_*` URLs are set → bridge; else the tab shows "isn't set up yet". The bridge stays in the repo for Signal (parked) or a later move to a server.
+
+What it does: Refresh groups lists every group, supergroup and channel Ali can post in and writes them to `whatsapp_groups` exactly like the bridge path. Sends go through the same queue, 15-minute pacing, scheduling, pause/resume/cancel, history and alert emails. Images/videos go as media, other files as documents with their filename, caption on the last file (a caption over 1024 characters is sent as its own message after the files). Errors read like `Telegram: CHAT_WRITE_FORBIDDEN`; a short flood wait (≤30s) is waited out once; "Telegram session expired; run the login script again" means the session must be redone.
+
+Setup (once, on Windows/PowerShell, from the repo root):
+1. Go to https://my.telegram.org, sign in with **Ali's number**, open **API development tools**, create an app (any name/short name, platform "Other") and note **api_id** and **api_hash**.
+2. Run `npm install`, then `npm run telegram-login`. Enter api_id, api_hash, Ali's phone number (`+61...`), the login code Telegram sends to Ali's Telegram app, and the two-step verification password if there is one. It prints the session string. Nothing is saved to disk. Treat the string like a password: it is a full login to Ali's account.
+3. Add the three values to Vercel production (each command asks for the value):
+   ```powershell
+   vercel env add TELEGRAM_API_ID production --sensitive
+   vercel env add TELEGRAM_API_HASH production --sensitive
+   vercel env add TELEGRAM_SESSION production --sensitive
+   ```
+4. Redeploy (`vercel --prod`, or redeploy the latest deployment in the Vercel dashboard) so the new env vars load.
+5. Open Broadcast → Telegram → **Refresh groups**, check the list, then send a test to one group.
+
+To revoke: in Telegram on Ali's phone go to **Settings → Devices** and terminate the session the login script created (it shows as the app name from step 1). Then remove `TELEGRAM_SESSION` from Vercel, or run step 2 again for a new one.
 
 **Adding a new WhatsApp account**: Add to `WhatsAppAccountId` union type and `WHATSAPP_ACCOUNTS` array in `whatsapp-accounts.ts`, add 3 env vars per account, add entries to `getWebhookUrl()` map, create Make.com scenarios.
 

@@ -21,7 +21,7 @@
  * connection open past SEND_TIMEOUT_MS, which reports delivered sends as failures.
  */
 import type { createAdminClient } from "~/lib/supabase/admin";
-import { getPlatformName, getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { getPlatformName, getWebhookUrl, isTelegramDirect, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 
@@ -156,7 +156,9 @@ export function isTimeout(reason: unknown): boolean {
 
 export function describeSendError(reason: unknown): string {
   if (reason instanceof Error) {
-    if (isTimeout(reason)) {
+    // Telegram direct-mode timeouts (src/lib/server/telegram.ts) already carry
+    // their own explanation; the text below is about the Make.com scenario.
+    if (isTimeout(reason) && !reason.message.startsWith("Telegram")) {
       return (
         `Make.com did not respond within ${SEND_TIMEOUT_MS / 1000}s, so it is unknown ` +
         `whether this group received the message. It was NOT re-sent, to avoid ` +
@@ -467,26 +469,36 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
       continue;
     }
 
+    // Stamp sent_at the moment each attachment actually lands, not only once
+    // the whole group succeeds. If a later attachment then fails, the catch
+    // block below leaves this stamp in place (it only ever writes
+    // status/error/send_after) - so getLastSentAt still sees the real contact
+    // that happened here, and the next group waits the full interval from it.
+    const onAttachmentSent = async () => {
+      await supabase
+        .from("whatsapp_broadcast_queue")
+        .update({ sent_at: new Date().toISOString() })
+        .eq("id", row.id);
+    };
+
     try {
-      const webhookUrl = getWebhookUrl(accountId as WhatsAppAccountId, "sendMessage");
-      const files = await loadImages(supabase, log);
-      await sendToGroup({
-        webhookUrl,
-        chatId: row.chat_id,
-        message: log.message,
-        files,
-        // Stamp sent_at the moment each attachment actually lands, not only once
-        // the whole group succeeds. If a later attachment then fails, the catch
-        // block below leaves this stamp in place (it only ever writes
-        // status/error/send_after) - so getLastSentAt still sees the real contact
-        // that happened here, and the next group waits the full interval from it.
-        onAttachmentSent: async () => {
-          await supabase
-            .from("whatsapp_broadcast_queue")
-            .update({ sent_at: new Date().toISOString() })
-            .eq("id", row.id);
-        },
-      });
+      if (isTelegramDirect(accountId)) {
+        // Telegram direct mode: GramJS from this function, no URL to post to.
+        // Loaded lazily so WhatsApp-only ticks never pull in GramJS.
+        const { sendTelegram } = await import("~/lib/server/telegram");
+        const files = await loadImages(supabase, log);
+        await sendTelegram({ chatId: row.chat_id, message: log.message, files, onAttachmentSent });
+      } else {
+        const webhookUrl = getWebhookUrl(accountId as WhatsAppAccountId, "sendMessage");
+        const files = await loadImages(supabase, log);
+        await sendToGroup({
+          webhookUrl,
+          chatId: row.chat_id,
+          message: log.message,
+          files,
+          onAttachmentSent,
+        });
+      }
 
       await supabase
         .from("whatsapp_broadcast_queue")

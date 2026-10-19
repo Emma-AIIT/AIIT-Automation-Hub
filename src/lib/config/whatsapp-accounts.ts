@@ -16,6 +16,10 @@
  *   - signal-aiit:  the linked AIIT Signal number (signal-cli-rest-api)
  * The bridge only does groups + sending; participant sync and 1:1 participant
  * messages stay WhatsApp-only, so those webhook types are left unconfigured.
+ * telegram-ali can instead run in Telegram direct mode (GramJS inside the Hub,
+ * no bridge server) when TELEGRAM_API_ID/_API_HASH/_SESSION are set; see
+ * getTelegramMode. Direct mode has no URL, so "is it set up" checks use
+ * isSendConfigured / isBroadcastConfigured rather than getWebhookUrl.
  *
  * Configured but inactive (tabs hidden in UI — un-comment in WHATSAPP_ACCOUNTS to enable):
  *   - susu-closets:   Susu Closets
@@ -35,6 +39,8 @@
 import { env } from '~/env';
 import { BROADCAST_PLATFORMS } from '~/lib/config/broadcast-platforms';
 import type { BroadcastPlatformId } from '~/lib/config/broadcast-platforms';
+import { resolveTelegramMode } from '~/lib/config/telegram-mode';
+import type { TelegramMode } from '~/lib/config/telegram-mode';
 
 export type WhatsAppAccountId =
   | 'aiit-automation'
@@ -134,8 +140,43 @@ export function getWebhookUrl(accountId: WhatsAppAccountId, type: WebhookType): 
   return url;
 }
 
-/** True when an account has both its group sync and send URLs set. SERVER-SIDE ONLY. */
+/**
+ * How telegram-ali reaches Telegram: "direct" (GramJS inside the Hub, see
+ * src/lib/server/telegram.ts), "bridge" (messaging bridge URLs), or null when
+ * neither is set up. Direct wins when both are configured. SERVER-SIDE ONLY.
+ */
+export function getTelegramMode(): TelegramMode {
+  return resolveTelegramMode({
+    apiId: env.TELEGRAM_API_ID,
+    apiHash: env.TELEGRAM_API_HASH,
+    session: env.TELEGRAM_SESSION,
+    bridgeSyncUrl: env.TELEGRAM_BRIDGE_SYNC_GROUPS_URL,
+    bridgeSendUrl: env.TELEGRAM_BRIDGE_SEND_URL,
+  });
+}
+
+/** True when this account sends through Telegram direct mode rather than a URL. SERVER-SIDE ONLY. */
+export function isTelegramDirect(accountId: string): boolean {
+  return accountId === 'telegram-ali' && getTelegramMode() === 'direct';
+}
+
+/**
+ * True when broadcasts on this account can be sent: Telegram direct mode, or a
+ * send URL from getWebhookUrl. For "fail fast" checks before queueing. SERVER-SIDE ONLY.
+ */
+export function isSendConfigured(accountId: WhatsAppAccountId): boolean {
+  if (isTelegramDirect(accountId)) return true;
+  try {
+    getWebhookUrl(accountId, 'sendMessage');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when an account has both its group sync and send set up. SERVER-SIDE ONLY. */
 export function isBroadcastConfigured(accountId: WhatsAppAccountId): boolean {
+  if (isTelegramDirect(accountId)) return true;
   try {
     getWebhookUrl(accountId, 'syncGroups');
     getWebhookUrl(accountId, 'sendMessage');

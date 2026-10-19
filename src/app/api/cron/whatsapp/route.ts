@@ -18,7 +18,7 @@
  */
 import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
-import { getPlatformName, getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { getPlatformName, isSendConfigured, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import { drainBroadcastQueue, enqueueBroadcast } from "~/lib/server/whatsapp-broadcast";
@@ -171,10 +171,9 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
 
     // Resolve the send webhook up front - each account has its own Make.com
     // scenario / Green API instance, and a missing one should fail loudly here
-    // rather than on every group for the next several hours.
-    try {
-      getWebhookUrl(accountId, "sendMessage");
-    } catch {
+    // rather than on every group for the next several hours. Telegram direct
+    // mode has no URL and passes on its env vars instead (isSendConfigured).
+    if (!isSendConfigured(accountId)) {
       await fail(`No send webhook is configured for account ${accountId}.`);
       continue;
     }

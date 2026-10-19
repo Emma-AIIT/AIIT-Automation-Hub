@@ -5,6 +5,10 @@
 import "./src/env.js";
 
 /** @type {import("next").NextConfig} */
-const config = {};
+const config = {
+  // GramJS (Telegram direct mode, src/lib/server/telegram.ts) uses Node built-ins
+  // and dynamic requires that do not survive bundling; load it from node_modules.
+  serverExternalPackages: ["telegram"],
+};
 
 export default config;

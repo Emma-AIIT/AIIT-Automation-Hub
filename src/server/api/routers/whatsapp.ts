@@ -14,6 +14,9 @@
  *     instead of Make.com for group syncs and broadcasts; the bridge returns groups
  *     and this router writes them to whatsapp_groups. Participant features are
  *     WhatsApp-only.
+ *   - telegram-ali in Telegram direct mode (TELEGRAM_API_ID/_API_HASH/_SESSION set)
+ *     skips the bridge: syncGroups lists chats with GramJS in this function
+ *     (src/lib/server/telegram.ts) and the cron sends the same way.
  *
  * All procedures accept `accountId` to scope operations to a specific WhatsApp account.
  * getWebhookUrl() resolves the correct Make.com webhook URL for each account + action.
@@ -32,6 +35,7 @@ import {
   getPlatformName,
   getWebhookUrl,
   isBroadcastConfigured,
+  isTelegramDirect,
 } from "~/lib/config/whatsapp-accounts";
 import { BROADCAST_PLATFORMS } from "~/lib/config/broadcast-platforms";
 import { sendAlertEmail } from "~/lib/server/alerts";
@@ -170,6 +174,7 @@ const bridgeGroupsSchema = z.object({
  * Mirrors what the Make.com scenario does for WhatsApp: upserts the bridge's groups
  * into whatsapp_groups for this account (PK id + account_id) and removes the
  * account's rows the bridge no longer returns (groups left or deleted).
+ * Telegram direct mode (listTelegramGroups) feeds its list through here too.
  */
 async function writeBridgeGroups(accountId: WhatsAppAccountId, groups: WhatsAppGroup[]): Promise<void> {
   const supabase = createAdminClient();
@@ -243,6 +248,25 @@ export const whatsappRouter = createTRPCRouter({
   syncGroups: publicProcedure
     .input(z.object({ accountId: accountIdSchema }))
     .mutation(async ({ input }) => {
+      // Telegram direct mode: list Ali's chats with GramJS right here, then write
+      // them exactly like the bridge's list. GramJS is loaded only on this path.
+      if (isTelegramDirect(input.accountId)) {
+        let groups: WhatsAppGroup[];
+        try {
+          const { listTelegramGroups } = await import("~/lib/server/telegram");
+          groups = await listTelegramGroups();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Telegram: could not list groups";
+          await sendAlertEmail(
+            `[AIIT Hub] Telegram group refresh FAILED (${input.accountId})`,
+            `The "Refresh groups" sync could not list Telegram chats.\n\nAccount: ${input.accountId}\nError: ${msg}`,
+          );
+          throw new TRPCError({ code: "BAD_GATEWAY", message: msg });
+        }
+        await writeBridgeGroups(input.accountId, groups);
+        return { success: true, synced: groups.length as number | null };
+      }
+
       const webhookUrl = getWebhookUrl(input.accountId, "syncGroups");
       const isBridge = getAccountPlatform(input.accountId) !== "whatsapp";
       const platformName = getPlatformName(input.accountId);
