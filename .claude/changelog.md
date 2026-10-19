@@ -47,6 +47,31 @@
 
 ## 📝 Changelog Entries
 
+### 2026-10-19 - Broadcast: Telegram direct mode (GramJS on Vercel, no bridge server)
+
+**Added**:
+- `src/lib/server/telegram.ts` (server-only): `withTelegram(fn)` connects as Ali's account from a saved StringSession, runs `fn` and always destroys the client (60s overall timeout); `listTelegramGroups()`; `sendTelegram({chatId, message, files, onAttachmentSent})` with the same semantics as `sendToGroup`.
+- `src/lib/server/telegram-helpers.ts`: pure logic ported from the bridge: `canPost`, `postableGroups`, `findDialog` (marked peer id match), `planSends` (caption on last file, >1024-char caption sent separately), `isMediaFileName`, `telegramErrorMessage`, `withFloodRetry`.
+- `src/lib/config/telegram-mode.ts`: `resolveTelegramMode()` (direct > bridge > none); `getTelegramMode()`, `isTelegramDirect()` and `isSendConfigured()` in `whatsapp-accounts.ts`.
+- Optional env vars `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION` (`src/env.js`, `.env.example`).
+- `npm run telegram-login` (`scripts/telegram-login.mjs`, interactive, prints the session string) and `npm test` (`tests/telegram.test.mjs`, node:test, 19 tests).
+- Dependency `telegram` (GramJS) 2.26.22, listed in `serverExternalPackages` in `next.config.js`.
+
+**Changed**:
+- `whatsapp.syncGroups`: in direct mode lists chats with GramJS and writes them through the same `writeBridgeGroups()` upsert + stale delete.
+- `drainBroadcastQueue`: dispatches `telegram-ali` to `sendTelegram` in direct mode (GramJS loaded with a dynamic import). WhatsApp/Make and bridge sends unchanged.
+- `/api/whatsapp/broadcast` and the cron's scheduled-message check accept direct mode without a URL; `isBroadcastConfigured` (and so `getPlatforms`) counts direct mode as connected.
+- `describeSendError` passes Telegram timeout messages through instead of the Make.com text.
+
+**Technical Details**:
+- Peer resolution: one `getDialogs` per operation, then the dialog whose `utils.getPeerId` equals the stored chat id. No access-hash column / migration needed at one send per 15 minutes.
+- Errors: `Telegram: <RPC code>`; flood waits ≤30s retried once, longer fail with the wait time; `AUTH_KEY_UNREGISTERED` / `SESSION_REVOKED` etc. → "Telegram session expired; run the login script again". A timeout is treated like a Make.com timeout (failed, not re-sent).
+- Setup for the user: HANDOVER.md → "Telegram (direct)". The bridge stays for Signal or a later server move.
+
+**Testing**: `npm test`, typecheck, lint, build with the Telegram env vars unset. Not tested against Ali's real Telegram account (needs his login).
+
+---
+
 ### 2026-10-19 - Broadcast: Telegram and Signal tabs wired to the messaging bridge
 
 **Added**:

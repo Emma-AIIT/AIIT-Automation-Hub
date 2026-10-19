@@ -22,7 +22,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
-import { getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { getWebhookUrl, isTelegramDirect, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import {
   BROADCAST_BUCKET,
@@ -106,14 +106,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Fail fast if this account's send webhook isn't configured - better here than
-    // on a cron tick hours from now.
-    try {
-      getWebhookUrl(accountId, "sendMessage");
-    } catch (err) {
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : "Webhook not configured" },
-        { status: 400 },
-      );
+    // on a cron tick hours from now. Telegram direct mode has no URL, so it is
+    // checked on its env vars instead.
+    if (!isTelegramDirect(accountId)) {
+      try {
+        getWebhookUrl(accountId, "sendMessage");
+      } catch (err) {
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Webhook not configured" },
+          { status: 400 },
+        );
+      }
     }
 
     const supabase = createAdminClient();

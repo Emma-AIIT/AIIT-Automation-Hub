@@ -13,6 +13,8 @@
     "lint:fix": "next lint --fix",
     "preview": "next build && next start",
     "start": "next start",
+    "telegram-login": "node scripts/telegram-login.mjs",
+    "test": "node --test tests/telegram.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -33,6 +35,7 @@
     "recharts": "^3.7.0",
     "server-only": "^0.0.1",
     "superjson": "^2.2.1",
+    "telegram": "^2.26.22",
     "zod": "^3.25.76"
   },
   "devDependencies": {
