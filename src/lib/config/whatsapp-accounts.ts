@@ -1,18 +1,27 @@
 /**
  * whatsapp-accounts config
  *
- * Defines the WhatsApp accounts managed by this hub and resolves their Make.com webhook URLs.
- * Each account maps to a separate Green API instance and a set of Make.com scenarios.
+ * Defines the messaging accounts managed by this hub and resolves their send/sync URLs.
+ * Despite the name, an account can be on any Broadcast platform (`platform` field):
+ * the broadcast queue, scheduler, cron and history are all keyed by account_id, so a
+ * Telegram or Signal account is just another account_id in the same tables.
  *
- * Active accounts:
+ * WhatsApp accounts map to a Green API instance and a set of Make.com scenarios:
  *   - aiit-automation: AIIT Automation (fully active)
  *   - aiit-business:   AIIT Business Account
+ *
+ * Telegram and Signal accounts are served by the messaging bridge
+ * (services/messaging-bridge, see its SETUP.md), which the Hub calls directly:
+ *   - telegram-ali: Ali's own Telegram account (GramJS)
+ *   - signal-aiit:  the linked AIIT Signal number (signal-cli-rest-api)
+ * The bridge only does groups + sending; participant sync and 1:1 participant
+ * messages stay WhatsApp-only, so those webhook types are left unconfigured.
  *
  * Configured but inactive (tabs hidden in UI — un-comment in WHATSAPP_ACCOUNTS to enable):
  *   - susu-closets:   Susu Closets
  *   - gim-foundation: GIM Foundation
  *
- * To add a new account:
+ * To add a new WhatsApp account:
  *   1. Add to WhatsAppAccountId union type
  *   2. Add entry to WHATSAPP_ACCOUNTS array
  *   3. Add 3 env vars: MAKE_WHATSAPP_<NAME>_PULL_GROUPS_WEBHOOK_URL,
@@ -20,15 +29,20 @@
  *   4. Add env vars to .env, .env.example, env.js, and Vercel dashboard
  *   5. Add entry to getWebhookUrl() map below
  *
- * SERVER-SIDE ONLY — do not import this file in client components.
+ * SERVER-SIDE ONLY for getWebhookUrl / isBroadcastConfigured (they read server env).
+ * The account list itself is safe to import in client components.
  */
 import { env } from '~/env';
+import { BROADCAST_PLATFORMS } from '~/lib/config/broadcast-platforms';
+import type { BroadcastPlatformId } from '~/lib/config/broadcast-platforms';
 
 export type WhatsAppAccountId =
   | 'aiit-automation'
   | 'aiit-business'
   | 'susu-closets'
-  | 'gim-foundation';
+  | 'gim-foundation'
+  | 'telegram-ali'
+  | 'signal-aiit';
 
 export type WebhookType =
   | 'syncGroups'
@@ -41,17 +55,37 @@ export type WhatsAppAccount = {
   name: string;
   /** Tailwind color class suffix used for the tab indicator dot */
   color: string;
+  platform: BroadcastPlatformId;
 };
 
 export const WHATSAPP_ACCOUNTS: WhatsAppAccount[] = [
-  { id: 'aiit-automation', name: 'AIIT Automation', color: 'blue' },
-  { id: 'aiit-business',   name: 'AIIT Business Account', color: 'amber' },
-  // { id: 'susu-closets',    name: 'Susu Closets',    color: 'pink' },   // not set up yet
-  // { id: 'gim-foundation',  name: 'GIM Foundation',  color: 'green' },  // not set up yet
+  { id: 'aiit-automation', name: 'AIIT Automation', color: 'blue', platform: 'whatsapp' },
+  { id: 'aiit-business',   name: 'AIIT Business Account', color: 'amber', platform: 'whatsapp' },
+  // { id: 'susu-closets',    name: 'Susu Closets',    color: 'pink', platform: 'whatsapp' },   // not set up yet
+  // { id: 'gim-foundation',  name: 'GIM Foundation',  color: 'green', platform: 'whatsapp' },  // not set up yet
+  { id: 'telegram-ali',    name: "Ali's account", color: 'sky', platform: 'telegram' },
+  { id: 'signal-aiit',     name: 'AIIT Signal', color: 'indigo', platform: 'signal' },
 ];
 
+/** Accounts on one platform, in display order. */
+export function accountsForPlatform(platform: BroadcastPlatformId): WhatsAppAccount[] {
+  return WHATSAPP_ACCOUNTS.filter((a) => a.platform === platform);
+}
+
+/** Platform of an account id, falling back to WhatsApp for unknown (legacy) ids. */
+export function getAccountPlatform(accountId: string): BroadcastPlatformId {
+  return WHATSAPP_ACCOUNTS.find((a) => a.id === accountId)?.platform ?? 'whatsapp';
+}
+
+/** "WhatsApp" / "Telegram" / "Signal" for an account id, for alert emails and errors. */
+export function getPlatformName(accountId: string): string {
+  const platform = getAccountPlatform(accountId);
+  return BROADCAST_PLATFORMS.find((p) => p.id === platform)?.name ?? 'WhatsApp';
+}
+
 /**
- * Returns the Make.com webhook URL for a given account and webhook type.
+ * Returns the send/sync URL for a given account and webhook type: a Make.com webhook
+ * for WhatsApp accounts, a messaging bridge endpoint for Telegram and Signal.
  * Throws if the env var is not set, so callers surface a clear error.
  * SERVER-SIDE ONLY — do not import in client components.
  */
@@ -81,9 +115,32 @@ export function getWebhookUrl(accountId: WhatsAppAccountId, type: WebhookType): 
       sendParticipantMessage: env.MAKE_WHATSAPP_GIM_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL,
       syncParticipants:       env.MAKE_WHATSAPP_GIM_PULL_PARTICIPANTS_WEBHOOK_URL,
     },
+    'telegram-ali': {
+      syncGroups:             env.TELEGRAM_BRIDGE_SYNC_GROUPS_URL,
+      sendMessage:            env.TELEGRAM_BRIDGE_SEND_URL,
+      sendParticipantMessage: undefined, // WhatsApp-only
+      syncParticipants:       undefined, // WhatsApp-only
+    },
+    'signal-aiit': {
+      syncGroups:             env.SIGNAL_BRIDGE_SYNC_GROUPS_URL,
+      sendMessage:            env.SIGNAL_BRIDGE_SEND_URL,
+      sendParticipantMessage: undefined, // WhatsApp-only
+      syncParticipants:       undefined, // WhatsApp-only
+    },
   };
 
   const url = map[accountId]?.[type];
   if (!url) throw new Error(`Webhook not configured: ${accountId}.${type}`);
   return url;
+}
+
+/** True when an account has both its group sync and send URLs set. SERVER-SIDE ONLY. */
+export function isBroadcastConfigured(accountId: WhatsAppAccountId): boolean {
+  try {
+    getWebhookUrl(accountId, 'syncGroups');
+    getWebhookUrl(accountId, 'sendMessage');
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -44,6 +44,13 @@ export const env = createEnv({
     MAKE_WHATSAPP_BUSINESS_SEND_MESSAGE_WEBHOOK_URL: z.string().url().optional(),
     MAKE_WHATSAPP_BUSINESS_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL: z.string().url().optional(),
     MAKE_WHATSAPP_BUSINESS_PULL_PARTICIPANTS_WEBHOOK_URL: z.string().url().optional(),
+    // Messaging bridge (services/messaging-bridge) for the Telegram and Signal
+    // Broadcast tabs. Full URLs including ?key=... A platform counts as connected
+    // once both its sync and send URLs are set.
+    TELEGRAM_BRIDGE_SYNC_GROUPS_URL: z.string().url().optional(),
+    TELEGRAM_BRIDGE_SEND_URL: z.string().url().optional(),
+    SIGNAL_BRIDGE_SYNC_GROUPS_URL: z.string().url().optional(),
+    SIGNAL_BRIDGE_SEND_URL: z.string().url().optional(),
     WHATSAPP_IMPORT_SECRET: z.string().min(1).optional(),
     WHATSAPP_ALERT_EMAIL: z.string().email().optional(),
     CRON_SECRET: z.string().min(1).optional(),
@@ -103,6 +110,10 @@ export const env = createEnv({
     MAKE_WHATSAPP_BUSINESS_SEND_MESSAGE_WEBHOOK_URL: process.env.MAKE_WHATSAPP_BUSINESS_SEND_MESSAGE_WEBHOOK_URL,
     MAKE_WHATSAPP_BUSINESS_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL: process.env.MAKE_WHATSAPP_BUSINESS_SEND_PARTICIPANT_MESSAGE_WEBHOOK_URL,
     MAKE_WHATSAPP_BUSINESS_PULL_PARTICIPANTS_WEBHOOK_URL: process.env.MAKE_WHATSAPP_BUSINESS_PULL_PARTICIPANTS_WEBHOOK_URL,
+    TELEGRAM_BRIDGE_SYNC_GROUPS_URL: process.env.TELEGRAM_BRIDGE_SYNC_GROUPS_URL,
+    TELEGRAM_BRIDGE_SEND_URL: process.env.TELEGRAM_BRIDGE_SEND_URL,
+    SIGNAL_BRIDGE_SYNC_GROUPS_URL: process.env.SIGNAL_BRIDGE_SYNC_GROUPS_URL,
+    SIGNAL_BRIDGE_SEND_URL: process.env.SIGNAL_BRIDGE_SEND_URL,
     WHATSAPP_IMPORT_SECRET: process.env.WHATSAPP_IMPORT_SECRET,
     WHATSAPP_ALERT_EMAIL: process.env.WHATSAPP_ALERT_EMAIL,
     CRON_SECRET: process.env.CRON_SECRET,

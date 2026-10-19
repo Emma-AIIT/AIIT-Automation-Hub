@@ -216,6 +216,17 @@ Copy `.env.example` to `.env` and fill in all values. Get actual values from Zim
 | `MAKE_WHATSAPP_GIM_SEND_MESSAGE_WEBHOOK_URL` | Sends broadcast for GIM Foundation |
 | `MAKE_WHATSAPP_GIM_PULL_PARTICIPANTS_WEBHOOK_URL` | Syncs participants for GIM Foundation |
 
+### Messaging bridge — Telegram and Signal Broadcast
+
+Full endpoint URLs of `services/messaging-bridge`, each including the bridge secret as `?key=...`. All optional: a platform's Broadcast tab shows "isn't set up yet" until both of its URLs are set.
+
+| Variable | What it does |
+|----------|-------------|
+| `TELEGRAM_BRIDGE_SYNC_GROUPS_URL` | Returns the Telegram groups of Ali's account (`telegram-ali`) |
+| `TELEGRAM_BRIDGE_SEND_URL` | Sends one Telegram group message |
+| `SIGNAL_BRIDGE_SYNC_GROUPS_URL` | Returns the Signal groups of the linked number (`signal-aiit`) |
+| `SIGNAL_BRIDGE_SEND_URL` | Sends one Signal group message |
+
 ### VAPI
 
 | Variable | Description |
@@ -351,6 +362,11 @@ no serverless function lives that long.
   it skips any broadcast that has queue rows.
 - Broadcasts cap at 200 groups. At 15 minutes apart that is already ~2 days of
   sending — a 568 group send would take 142 days.
+
+**Telegram and Signal (Broadcast tabs)**: the same page, queue, pacing, scheduling and history serve two more accounts, `telegram-ali` (Ali's own Telegram account, via GramJS) and `signal-aiit` (a linked Signal number, via self-hosted signal-cli-rest-api). Both sit behind the messaging bridge in `services/messaging-bridge/` (runs on an Oracle Cloud VM; setup in `services/messaging-bridge/SETUP.md`). The Hub calls it directly, with no Make.com in between:
+- **Refresh groups** → `POST {"trigger":"pull_groups"}` to the platform's sync URL → `{"synced": n, "groups": [{id, name}]}`. Unlike Make.com, the bridge does not write to Supabase: `whatsapp.syncGroups` upserts the groups into `whatsapp_groups` for that account and deletes the account's groups that were not returned.
+- **Sending** → the cron posts exactly what it posts to Make.com (`{chatId, message}` JSON, or multipart `chatId` + `message` + `file` per attachment, caption on the last) to the platform's send URL. A non-2xx with a plain-text body is the error shown in Broadcast History.
+- `whatsapp.getPlatforms` tells the page which platforms are configured. Participant sync and 1:1 participant messages stay WhatsApp-only.
 
 **Adding a new WhatsApp account**: Add to `WhatsAppAccountId` union type and `WHATSAPP_ACCOUNTS` array in `whatsapp-accounts.ts`, add 3 env vars per account, add entries to `getWebhookUrl()` map, create Make.com scenarios.
 

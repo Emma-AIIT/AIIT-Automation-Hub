@@ -11,7 +11,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
 import { env } from "~/env";
-import { WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { accountsForPlatform } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 
 /** Selected groups are read from Supabase (whatsapp_dashboard_groups). Seed via scripts/seed-whatsapp-dashboard-groups.sql */
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     // Optional accountId form field — defaults to the original account for existing callers
     const accountIdRaw = formData.get("accountId");
     const accountId: WhatsAppAccountId =
-      typeof accountIdRaw === "string" && WHATSAPP_ACCOUNTS.some((a) => a.id === accountIdRaw)
+      typeof accountIdRaw === "string" && accountsForPlatform("whatsapp").some((a) => a.id === accountIdRaw)
         ? (accountIdRaw as WhatsAppAccountId)
         : "aiit-automation";
 

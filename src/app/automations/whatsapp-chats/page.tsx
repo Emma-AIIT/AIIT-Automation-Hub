@@ -12,7 +12,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import type { ChatThread } from '@/server/api/routers/whatsapp';
-import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
+import { accountsForPlatform } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 
 const SYDNEY_TZ = 'Australia/Sydney';
@@ -143,7 +143,7 @@ export default function WhatsAppChatsPage() {
 
       {/* Account Tabs */}
       <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit">
-        {WHATSAPP_ACCOUNTS.map((account) => (
+        {accountsForPlatform('whatsapp').map((account) => (
           <button
             key={account.id}
             onClick={() => handleAccountSwitch(account.id)}
