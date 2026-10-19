@@ -1,0 +1,52 @@
+# AIIT messaging bridge: Telegram (GramJS) + Signal (signal-cli-rest-api) behind Caddy HTTPS.
+# All images are multi-arch and run on the Oracle Cloud Ampere A1 (arm64) VM.
+# See SETUP.md for the step-by-step guide.
+
+services:
+  bridge:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "3000"
+      SIGNAL_API_URL: http://signal-api:8080
+    depends_on:
+      - signal-api
+    # Not published: only Caddy reaches it over the internal network.
+    expose:
+      - "3000"
+
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    restart: unless-stopped
+    environment:
+      MODE: json-rpc
+    volumes:
+      - signal-data:/home/.local/share/signal-cli
+    # Bound to the VM's localhost only, never the public internet.
+    # Reach it from your laptop with an SSH tunnel (SETUP.md step 5) to link the phone.
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      BRIDGE_DOMAIN: ${BRIDGE_DOMAIN:?Set BRIDGE_DOMAIN in .env, e.g. 203-0-113-10.sslip.io}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - bridge
+
+volumes:
+  signal-data:
+  caddy-data:
+  caddy-config:
