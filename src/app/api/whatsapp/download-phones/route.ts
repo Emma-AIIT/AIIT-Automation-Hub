@@ -9,11 +9,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
-import { WHATSAPP_ACCOUNTS, type WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
+import { accountsForPlatform, type WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 
-// Accept only the accounts that are actually active in WHATSAPP_ACCOUNTS,
+// Accept only the active WhatsApp accounts (participants are WhatsApp-only),
 // so this list can never drift from the configured accounts.
-const VALID_ACCOUNT_IDS: WhatsAppAccountId[] = WHATSAPP_ACCOUNTS.map((a) => a.id);
+const VALID_ACCOUNT_IDS: WhatsAppAccountId[] = accountsForPlatform("whatsapp").map((a) => a.id);
 
 export async function GET(req: NextRequest) {
   const accountIdRaw = req.nextUrl.searchParams.get('accountId');

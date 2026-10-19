@@ -18,7 +18,7 @@
  */
 import { type NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
-import { getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { getPlatformName, getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import { drainBroadcastQueue, enqueueBroadcast } from "~/lib/server/whatsapp-broadcast";
@@ -116,7 +116,7 @@ async function sweepOrphanedBroadcasts(supabase: SupabaseAdmin): Promise<number>
     const accountName =
       WHATSAPP_ACCOUNTS.find((a) => a.id === row.account_id)?.name ?? row.account_id;
     await sendAlertEmail(
-      `[AIIT Hub] WhatsApp broadcast DID NOT COMPLETE (${accountName})`,
+      `[AIIT Hub] ${getPlatformName(row.account_id)} broadcast DID NOT COMPLETE (${accountName})`,
       [
         `A dashboard broadcast was still in flight after ${STUCK_AFTER_MINUTES} minutes, so the send was interrupted before it finished.`,
         ``,
@@ -164,7 +164,7 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
         .update({ status: "failed", sent_at: new Date().toISOString(), error: reason })
         .eq("id", msg.id);
       await sendAlertEmail(
-        `[AIIT Hub] Scheduled WhatsApp message FAILED (${accountId})`,
+        `[AIIT Hub] Scheduled ${getPlatformName(accountId)} message FAILED (${accountId})`,
         `A scheduled message could not be queued: ${reason}\n\nMessage: ${(msg.message as string).slice(0, 300)}`,
       );
     };

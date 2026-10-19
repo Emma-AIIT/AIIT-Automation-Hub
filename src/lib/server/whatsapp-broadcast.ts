@@ -21,7 +21,7 @@
  * connection open past SEND_TIMEOUT_MS, which reports delivered sends as failures.
  */
 import type { createAdminClient } from "~/lib/supabase/admin";
-import { getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { getPlatformName, getWebhookUrl, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 
@@ -307,10 +307,11 @@ async function refreshBroadcast(supabase: SupabaseAdmin, broadcastId: string): P
   if (counts.failed > 0 && logRow) {
     const accountName =
       WHATSAPP_ACCOUNTS.find((a) => a.id === logRow.account_id)?.name ?? logRow.account_id;
+    const platformName = getPlatformName(logRow.account_id);
     await sendAlertEmail(
-      `[AIIT Hub] WhatsApp broadcast ${status === "failed" ? "FAILED" : "PARTIALLY FAILED"} (${accountName})`,
+      `[AIIT Hub] ${platformName} broadcast ${status === "failed" ? "FAILED" : "PARTIALLY FAILED"} (${accountName})`,
       [
-        `A paced WhatsApp broadcast finished with failures.`,
+        `A paced ${platformName} broadcast finished with failures.`,
         ``,
         `Account: ${accountName}`,
         `Sent: ${counts.sent} / ${rows.length} groups (${counts.failed} failed${counts.cancelled ? `, ${counts.cancelled} cancelled` : ""})`,

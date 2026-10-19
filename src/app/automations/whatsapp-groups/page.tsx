@@ -1,8 +1,10 @@
 /**
  * Broadcast page — one place to post to WhatsApp, Telegram and Signal groups, with a
- * tab per platform. Only WhatsApp is connected; Telegram and Signal render the same
- * page with no groups or history and make no server calls (see
- * lib/config/broadcast-platforms.ts).
+ * tab per platform and, under it, that platform's accounts. Every platform shares the
+ * same queue, pacing, scheduling and history, keyed by account id. Telegram and Signal
+ * go through the messaging bridge; whatsapp.getPlatforms says whether each platform is
+ * set up, and one that isn't renders the page with no groups or history and makes no
+ * server calls for it.
  *
  * WhatsApp tab: compose and send text messages or images to one or more
  * WhatsApp groups across multiple accounts (aiit-automation, susu-closets, etc.).
@@ -32,7 +34,7 @@ import { BroadcastHistory } from '@/components/modules/whatsapp-groups/Broadcast
 import { PlatformIcon } from '@/components/modules/broadcast/PlatformIcon';
 import { BROADCAST_PLATFORMS } from '@/lib/config/broadcast-platforms';
 import type { BroadcastPlatformId } from '@/lib/config/broadcast-platforms';
-import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
+import { accountsForPlatform } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 import type { BroadcastLogEntry, WhatsAppGroup } from '@/server/api/routers/whatsapp';
 
@@ -61,6 +63,12 @@ function formatFileSize(bytes: number): string {
 export default function WhatsAppBroadcastPage() {
   const [activePlatform, setActivePlatform] = useState<BroadcastPlatformId>('whatsapp');
   const platform = BROADCAST_PLATFORMS.find((p) => p.id === activePlatform) ?? BROADCAST_PLATFORMS[0]!;
+  // Which platforms are set up depends on server env. Until it answers, WhatsApp is
+  // treated as connected (as it always was) and the others as not set up.
+  const { data: platformStatus } = api.whatsapp.getPlatforms.useQuery(undefined, { staleTime: Infinity });
+  const platformInfo = platformStatus?.find((p) => p.id === activePlatform);
+  const connected = platformInfo?.connected ?? activePlatform === 'whatsapp';
+  const accounts = platformInfo?.accounts ?? accountsForPlatform(activePlatform);
   const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -82,9 +90,12 @@ export default function WhatsAppBroadcastPage() {
   }, []);
 
   // The draft message is kept across platforms so it can be posted to each in turn;
-  // group selection is per platform, so it is cleared.
+  // group selection is per platform, so it is cleared, and the platform's first
+  // account becomes active.
   const handlePlatformSwitch = useCallback((id: BroadcastPlatformId) => {
     setActivePlatform(id);
+    const first = accountsForPlatform(id)[0];
+    if (first) setActiveAccount(first.id);
     setSelectedIds(new Set());
   }, []);
 
@@ -97,13 +108,13 @@ export default function WhatsAppBroadcastPage() {
     refetch: refetchGroups,
   } = api.whatsapp.getGroups.useQuery(
     { accountId: activeAccount },
-    { staleTime: 5 * 60 * 1000, enabled: platform.connected },
+    { staleTime: 5 * 60 * 1000, enabled: connected },
   );
-  const groups = platform.connected ? whatsappGroups : NO_GROUPS;
+  const groups = connected ? whatsappGroups : NO_GROUPS;
 
   const syncMutation = api.whatsapp.syncGroups.useMutation({
     onSuccess: (result) => {
-      const label = result.synced !== null ? `Synced ${result.synced} groups from WhatsApp` : 'Groups synced from WhatsApp';
+      const label = result.synced !== null ? `Synced ${result.synced} groups from ${platform.name}` : `Groups synced from ${platform.name}`;
       toast.success(label, { duration: 6000 });
       void refetchGroups();
     },
@@ -111,10 +122,10 @@ export default function WhatsAppBroadcastPage() {
   });
 
   const isRefreshing = syncMutation.isPending;
-  const isLoading = platform.connected && (groupsLoading || isRefreshing);
+  const isLoading = connected && (groupsLoading || isRefreshing);
 
   // Show empty state if DB has no groups yet (first use)
-  const notFetchedYet = groups.length === 0 && (!platform.connected || (!groupsLoading && !groupsError));
+  const notFetchedYet = groups.length === 0 && (!connected || (!groupsLoading && !groupsError));
 
   const handleToggle = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -134,13 +145,13 @@ export default function WhatsAppBroadcastPage() {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    if (!platform.connected) {
+    if (!connected) {
       toast(`${platform.name} isn't set up yet, so there are no groups to pull.`);
       return;
     }
     setSelectedIds(new Set());
     syncMutation.mutate({ accountId: activeAccount });
-  }, [syncMutation, activeAccount, platform]);
+  }, [syncMutation, activeAccount, platform, connected]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(e.target.files ?? []);
@@ -244,7 +255,7 @@ export default function WhatsAppBroadcastPage() {
   const handleSend = useCallback(async () => {
     const hasMessage = message.trim().length > 0;
     const hasImage = attachments.length > 0;
-    if (!platform.connected || (!hasMessage && !hasImage) || selectedIds.size === 0 || isSending) return;
+    if (!connected || (!hasMessage && !hasImage) || selectedIds.size === 0 || isSending) return;
 
     setIsSending(true);
     const ids = Array.from(selectedIds);
@@ -294,14 +305,14 @@ export default function WhatsAppBroadcastPage() {
     } finally {
       setIsSending(false);
     }
-  }, [message, attachments, selectedIds, isSending, activeAccount, groups, platform.connected]);
+  }, [message, attachments, selectedIds, isSending, activeAccount, groups, connected]);
 
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
 
   const canSend =
-    platform.connected &&
+    connected &&
     (message.trim().length > 0 || attachments.length > 0) &&
     selectedIds.size > 0 &&
     !isSending &&
@@ -363,13 +374,13 @@ export default function WhatsAppBroadcastPage() {
 
       {/* Account Tabs */}
       <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit">
-        {!platform.connected && (
-          <span className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-white shadow-sm text-(--color-text-primary) border border-(--color-border-subtle)">
+        {!connected && accounts.map((account) => (
+          <span key={account.id} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-white shadow-sm text-(--color-text-primary) border border-(--color-border-subtle)">
             <span className="w-2 h-2 rounded-full shrink-0 bg-(--pc)" />
-            {platform.accountLabel}
+            {account.name}
           </span>
-        )}
-        {platform.connected && WHATSAPP_ACCOUNTS.map((account) => (
+        ))}
+        {connected && accounts.map((account) => (
           <button
             key={account.id}
             onClick={() => handleAccountSwitch(account.id)}
@@ -381,7 +392,8 @@ export default function WhatsAppBroadcastPage() {
               }
             `}
           >
-            <span className={`w-2 h-2 rounded-full bg-${account.color}-500 shrink-0`} />
+            {/* Telegram/Signal accounts use the platform colour for their dot */}
+            <span className={`w-2 h-2 rounded-full shrink-0 ${activePlatform === 'whatsapp' ? `bg-${account.color}-500` : 'bg-(--pc)'}`} />
             {account.name}
           </button>
         ))}
@@ -569,7 +581,7 @@ export default function WhatsAppBroadcastPage() {
             <GroupSelector
               groups={groups}
               loading={isLoading}
-              isError={platform.connected && groupsError}
+              isError={connected && groupsError}
               errorMessage={groupsErrorMsg?.message}
               notFetchedYet={notFetchedYet}
               selectedIds={selectedIds}
@@ -578,13 +590,13 @@ export default function WhatsAppBroadcastPage() {
               onSelectAll={handleSelectAll}
               onClearAll={handleClearAll}
               onRefresh={handleRefresh}
-              emptyState={platform.connected ? undefined : (
+              emptyState={connected ? undefined : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3 bg-(--pc)/10 text-(--pc)">
                     <PlatformIcon platform={platform.id} />
                   </div>
-                  <p className="text-sm font-medium text-(--color-text-primary)">No {platform.name} groups yet</p>
-                  <p className="text-xs text-(--color-text-muted) mt-1">Your {platform.name} groups will show here</p>
+                  <p className="text-sm font-medium text-(--color-text-primary)">{platform.name} isn&apos;t set up yet</p>
+                  <p className="text-xs text-(--color-text-muted) mt-1">Your {platform.name} groups will show here once it is connected</p>
                 </div>
               )}
             />
@@ -592,7 +604,7 @@ export default function WhatsAppBroadcastPage() {
         </div>
       </div>
 
-      {platform.connected ? (
+      {connected ? (
         <>
           {/* Scheduled messages list */}
           <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />
@@ -631,7 +643,7 @@ export default function WhatsAppBroadcastPage() {
       )}
 
       {/* Schedule modal */}
-      {platform.connected && <ScheduleModal
+      {connected && <ScheduleModal
         accountId={activeAccount}
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}

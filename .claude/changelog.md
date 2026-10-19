@@ -47,6 +47,28 @@
 
 ## 📝 Changelog Entries
 
+### 2026-10-19 - Broadcast: Telegram and Signal tabs wired to the messaging bridge
+
+**Added**:
+- Accounts `telegram-ali` ("Ali's account", Telegram) and `signal-aiit` ("AIIT Signal", Signal) in `src/lib/config/whatsapp-accounts.ts`. Every account now has a `platform` field; new helpers `accountsForPlatform()`, `getAccountPlatform()`, `getPlatformName()`, `isBroadcastConfigured()`.
+- `whatsapp.getPlatforms` tRPC query: per platform, its accounts `{id, name, color}` and whether it is `connected`. WhatsApp is always connected; Telegram/Signal once their bridge sync + send URLs are set.
+- Optional env vars `TELEGRAM_BRIDGE_SYNC_GROUPS_URL`, `TELEGRAM_BRIDGE_SEND_URL`, `SIGNAL_BRIDGE_SYNC_GROUPS_URL`, `SIGNAL_BRIDGE_SEND_URL` (full bridge URLs with `?key=...`).
+
+**Changed**:
+- `whatsapp.syncGroups`: for Telegram/Signal the bridge returns `{synced, groups}` and the Hub upserts them into `whatsapp_groups` for that account and deletes the account's rows no longer returned. WhatsApp still lets Make.com write the table.
+- Broadcast page: the account tabs show only the active platform's accounts, switching platform selects its first account, and groups / refresh / send / schedule / history all run on that account. A platform that isn't configured keeps the "isn't set up yet" state and makes no calls. Toasts name the platform ("Synced 12 groups from Telegram").
+- Alert email subjects say Telegram/Signal for those accounts (queue, cron, group refresh).
+- Participants, Chats, participant CSV import and phone download only list/accept WhatsApp accounts (participant features are WhatsApp-only).
+- `broadcast-platforms.ts` no longer has the static `connected` / `accountLabel` fields.
+
+**Technical Details**:
+- Sending reuses the queue unchanged: `sendToGroup()` posts the same JSON / multipart to the bridge send URL, with the same 15-minute pacing, pause/resume/cancel, scheduling and history keyed by `account_id`. No migration: `whatsapp_groups` and the queue tables take any text `account_id`.
+- Bridge service and setup: `services/messaging-bridge/SETUP.md`.
+
+**Testing**: typecheck, lint, build. Local dev against a mock bridge, driven over the page's own tRPC/HTTP endpoints (no browser): group sync incl. stale-row removal, paced sends (JSON text; multipart per attachment with caption on the last), 15-min hold, pause/resume/cancel, history, and a scheduled send released by the cron, for Telegram and Signal. WhatsApp groups and platform status unchanged. With the env vars unset, `getPlatforms` reports Telegram/Signal as not connected. Not tested against real Telegram/Signal accounts.
+
+---
+
 ### 2026-10-19 - Broadcast page: WhatsApp, Telegram and Signal tabs
 
 **Changed**:

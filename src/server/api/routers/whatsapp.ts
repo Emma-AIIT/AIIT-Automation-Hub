@@ -10,6 +10,10 @@
  *   - Reads come from Supabase cache (fast, no Make.com call).
  *   - Syncs (groups, participants) trigger Make.com → Green API → Supabase upsert.
  *   - Broadcasts are sent via Make.com → Green API → WhatsApp.
+ *   - Telegram/Signal accounts (telegram-ali, signal-aiit) use the messaging bridge
+ *     instead of Make.com for group syncs and broadcasts; the bridge returns groups
+ *     and this router writes them to whatsapp_groups. Participant features are
+ *     WhatsApp-only.
  *
  * All procedures accept `accountId` to scope operations to a specific WhatsApp account.
  * getWebhookUrl() resolves the correct Make.com webhook URL for each account + action.
@@ -21,7 +25,15 @@ import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { TRPCError } from "@trpc/server";
 import { createAdminClient } from "~/lib/supabase/admin";
-import { WHATSAPP_ACCOUNTS, getWebhookUrl } from "~/lib/config/whatsapp-accounts";
+import {
+  WHATSAPP_ACCOUNTS,
+  accountsForPlatform,
+  getAccountPlatform,
+  getPlatformName,
+  getWebhookUrl,
+  isBroadcastConfigured,
+} from "~/lib/config/whatsapp-accounts";
+import { BROADCAST_PLATFORMS } from "~/lib/config/broadcast-platforms";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import {
@@ -149,6 +161,48 @@ export interface ChatMessage {
   created_at: string;
 }
 
+// Response of the messaging bridge's sync-groups endpoint (services/messaging-bridge).
+const bridgeGroupsSchema = z.object({
+  groups: z.array(z.object({ id: z.string().min(1), name: z.string() })),
+});
+
+/**
+ * Mirrors what the Make.com scenario does for WhatsApp: upserts the bridge's groups
+ * into whatsapp_groups for this account (PK id + account_id) and removes the
+ * account's rows the bridge no longer returns (groups left or deleted).
+ */
+async function writeBridgeGroups(accountId: WhatsAppAccountId, groups: WhatsAppGroup[]): Promise<void> {
+  const supabase = createAdminClient();
+  const now = new Date().toISOString();
+  // A chat can only appear once per upsert statement
+  const unique = [...new Map(groups.map((g) => [g.id, g])).values()];
+
+  if (unique.length > 0) {
+    const { error } = await supabase.from("whatsapp_groups").upsert(
+      unique.map((g) => ({ id: g.id, name: g.name || g.id, account_id: accountId, updated_at: now })),
+      { onConflict: "id,account_id" },
+    );
+    if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+  }
+
+  const { data: existing, error: readError } = await supabase
+    .from("whatsapp_groups")
+    .select("id")
+    .eq("account_id", accountId);
+  if (readError) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: readError.message });
+
+  const keep = new Set(unique.map((g) => g.id));
+  const stale = (existing ?? []).map((r) => (r as { id: string }).id).filter((id) => !keep.has(id));
+  if (stale.length > 0) {
+    const { error } = await supabase
+      .from("whatsapp_groups")
+      .delete()
+      .eq("account_id", accountId)
+      .in("id", stale);
+    if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+  }
+}
+
 export const whatsappRouter = createTRPCRouter({
   // Reads from Supabase DB cache — fast, no Make.com call
   getGroups: publicProcedure
@@ -164,13 +218,35 @@ export const whatsappRouter = createTRPCRouter({
       return (data ?? []) as WhatsAppGroup[];
     }),
 
-  // Triggers Make.com webhook → Make.com pulls from Green API and upserts directly to Supabase.
-  // We just fire the trigger and wait for a success/error response.
+  // Which Broadcast platforms are set up, and their accounts. broadcast-platforms.ts is
+  // client-safe and can't read server env, so the page asks here. WhatsApp is always
+  // connected (an unset Make webhook surfaces its own error on use, as before);
+  // Telegram/Signal are connected once every account has its bridge sync + send URLs.
+  getPlatforms: publicProcedure.query(() =>
+    BROADCAST_PLATFORMS.map((p) => {
+      const accounts = accountsForPlatform(p.id);
+      return {
+        id: p.id,
+        connected:
+          p.id === "whatsapp" ||
+          (accounts.length > 0 && accounts.every((a) => isBroadcastConfigured(a.id))),
+        accounts: accounts.map((a) => ({ id: a.id, name: a.name, color: a.color })),
+      };
+    }),
+  ),
+
+  // WhatsApp: triggers Make.com webhook → Make.com pulls from Green API and upserts
+  // directly to Supabase. We just fire the trigger and wait for a success/error response.
+  // Telegram/Signal: the messaging bridge only RETURNS the groups, so they are written
+  // to whatsapp_groups here (see writeBridgeGroups).
   // After this resolves, the page refetches getGroups from Supabase to get the fresh list.
   syncGroups: publicProcedure
     .input(z.object({ accountId: accountIdSchema }))
     .mutation(async ({ input }) => {
       const webhookUrl = getWebhookUrl(input.accountId, "syncGroups");
+      const isBridge = getAccountPlatform(input.accountId) !== "whatsapp";
+      const platformName = getPlatformName(input.accountId);
+      const service = isBridge ? "the messaging bridge" : "Make.com";
 
       let res: Response;
       try {
@@ -180,10 +256,10 @@ export const whatsappRouter = createTRPCRouter({
           body: JSON.stringify({ trigger: "pull_groups" }),
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Network error reaching Make.com";
+        const msg = err instanceof Error ? err.message : `Network error reaching ${service}`;
         await sendAlertEmail(
-          `[AIIT Hub] WhatsApp group refresh FAILED (${input.accountId})`,
-          `The "Refresh groups" sync could not reach Make.com.\n\nAccount: ${input.accountId}\nError: ${msg}`,
+          `[AIIT Hub] ${platformName} group refresh FAILED (${input.accountId})`,
+          `The "Refresh groups" sync could not reach ${service}.\n\nAccount: ${input.accountId}\nError: ${msg}`,
         );
         throw new TRPCError({ code: "BAD_GATEWAY", message: msg });
       }
@@ -195,10 +271,26 @@ export const whatsappRouter = createTRPCRouter({
           if (body) makeError = body;
         } catch { /* ignore */ }
         await sendAlertEmail(
-          `[AIIT Hub] WhatsApp group refresh FAILED (${input.accountId})`,
-          `The "Refresh groups" sync failed in Make.com.\n\nAccount: ${input.accountId}\nError: ${makeError}`,
+          `[AIIT Hub] ${platformName} group refresh FAILED (${input.accountId})`,
+          `The "Refresh groups" sync failed in ${service}.\n\nAccount: ${input.accountId}\nError: ${makeError}`,
         );
         throw new TRPCError({ code: "BAD_GATEWAY", message: makeError });
+      }
+
+      if (isBridge) {
+        let groups: WhatsAppGroup[];
+        try {
+          groups = bridgeGroupsSchema.parse(await res.json()).groups;
+        } catch {
+          const msg = `The messaging bridge returned an unexpected response for ${platformName} groups`;
+          await sendAlertEmail(
+            `[AIIT Hub] ${platformName} group refresh FAILED (${input.accountId})`,
+            `${msg}.\n\nAccount: ${input.accountId}`,
+          );
+          throw new TRPCError({ code: "BAD_GATEWAY", message: msg });
+        }
+        await writeBridgeGroups(input.accountId, groups);
+        return { success: true, synced: groups.length as number | null };
       }
 
       let synced: number | null = null;
