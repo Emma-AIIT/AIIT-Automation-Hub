@@ -22,6 +22,8 @@ interface GroupSelectorProps {
   onSelectAll: () => void;
   onClearAll: () => void;
   onRefresh: () => void;
+  /** Replaces the default "No groups loaded" state, e.g. for a platform that is not set up yet */
+  emptyState?: React.ReactNode;
 }
 
 export function GroupSelector({
@@ -36,6 +38,7 @@ export function GroupSelector({
   onSelectAll,
   onClearAll,
   onRefresh,
+  emptyState,
 }: GroupSelectorProps) {
   const [search, setSearch] = useState('');
 
@@ -108,6 +111,8 @@ export function GroupSelector({
               Try again
             </button>
           </div>
+        ) : notFetchedYet && emptyState ? (
+          emptyState
         ) : notFetchedYet ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="w-10 h-10 rounded-full bg-[#25D366]/10 flex items-center justify-center mb-3">

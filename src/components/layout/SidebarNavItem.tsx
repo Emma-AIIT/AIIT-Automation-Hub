@@ -12,7 +12,7 @@ import { useSidebar } from './SidebarContext';
 interface SidebarNavItemProps {
   href: string;
   label: string;
-  icon: 'dollar' | 'document' | 'users' | 'settings' | 'home' | 'phone' | 'ticket' | 'whatsapp' | 'receipt' | 'chat' | 'calendar';
+  icon: 'dollar' | 'document' | 'users' | 'settings' | 'home' | 'phone' | 'ticket' | 'whatsapp' | 'receipt' | 'chat' | 'calendar' | 'broadcast';
   active?: boolean;
   badge?: { count: number; color: 'red' | 'blue' };
   disabled?: boolean;
@@ -21,6 +21,13 @@ interface SidebarNavItemProps {
 }
 
 const icons: Record<SidebarNavItemProps['icon'], React.ReactNode> = {
+  broadcast: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+    </svg>
+  ),
   calendar: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />

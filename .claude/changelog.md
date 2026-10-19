@@ -47,6 +47,16 @@
 
 ## 📝 Changelog Entries
 
+### 2026-10-19 - Broadcast page: WhatsApp, Telegram and Signal tabs
+
+**Changed**:
+- "WhatsApp Broadcast" is now **Broadcast** in the sidebar (megaphone icon). The route is unchanged: `/automations/whatsapp-groups`.
+- The page has a tab per platform: WhatsApp, Telegram, Signal (`src/lib/config/broadcast-platforms.ts`). WhatsApp works exactly as before.
+- Telegram and Signal show the same compose / groups / history layout, empty, with sending off and no server calls, until their services are set up.
+- `GroupSelector` takes an optional `emptyState`; the send button and attach hover use the platform colour.
+
+---
+
 ### 2026-10-12 - Subscriptions page with live billing checks and renewal reminder
 
 **Why**: The Sep–Oct 2026 voice outage was an ElevenLabs card payment that failed

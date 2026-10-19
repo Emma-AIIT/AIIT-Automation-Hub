@@ -303,7 +303,7 @@ export interface SidebarModule {
   id: string;
   label: string;
   route: string;
-  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp" | "receipt" | "chat" | "calendar";
+  icon: "dollar" | "document" | "users" | "settings" | "home" | "phone" | "ticket" | "whatsapp" | "receipt" | "chat" | "calendar" | "broadcast";
   badge?: { count: number; color: "red" | "blue" };
   disabled?: boolean;
   comingSoon?: boolean;
@@ -354,9 +354,9 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
   },
   {
     id: "whatsapp-groups",
-    label: "WhatsApp Broadcast",
+    label: "Broadcast",
     route: "/automations/whatsapp-groups",
-    icon: "whatsapp",
+    icon: "broadcast",
   },
   {
     id: "whatsapp-participants",

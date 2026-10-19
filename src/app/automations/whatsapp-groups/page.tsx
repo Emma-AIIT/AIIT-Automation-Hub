@@ -1,5 +1,10 @@
 /**
- * WhatsApp Broadcast page — compose and send text messages or images to one or more
+ * Broadcast page — one place to post to WhatsApp, Telegram and Signal groups, with a
+ * tab per platform. Only WhatsApp is connected; Telegram and Signal render the same
+ * page with no groups or history and make no server calls (see
+ * lib/config/broadcast-platforms.ts).
+ *
+ * WhatsApp tab: compose and send text messages or images to one or more
  * WhatsApp groups across multiple accounts (aiit-automation, susu-closets, etc.).
  * Groups are loaded from Supabase; a "Refresh groups" button triggers a Make.com sync.
  * Messages with images are forwarded as multipart via /api/whatsapp/send so Make.com
@@ -24,15 +29,22 @@ import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelecto
 import { ScheduleModal } from '@/components/modules/whatsapp-groups/ScheduleModal';
 import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledList';
 import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
+import { PlatformIcon } from '@/components/modules/broadcast/PlatformIcon';
+import { BROADCAST_PLATFORMS } from '@/lib/config/broadcast-platforms';
+import type { BroadcastPlatformId } from '@/lib/config/broadcast-platforms';
 import { WHATSAPP_ACCOUNTS } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
-import type { BroadcastLogEntry } from '@/server/api/routers/whatsapp';
+import type { BroadcastLogEntry, WhatsAppGroup } from '@/server/api/routers/whatsapp';
 
 type SendStatus = 'idle' | 'pending' | 'success' | 'error';
 
 // Per-group client results no longer exist (sends run server-side); GroupSelector
 // still accepts the map so pass a stable empty one.
 const EMPTY_SEND_RESULTS = new Map<string, SendStatus>();
+
+// Platforms that aren't connected have no groups; a module-level constant keeps the
+// reference stable for the callbacks that depend on `groups`.
+const NO_GROUPS: WhatsAppGroup[] = [];
 
 const MAX_CHARS = 1000;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
@@ -47,6 +59,8 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function WhatsAppBroadcastPage() {
+  const [activePlatform, setActivePlatform] = useState<BroadcastPlatformId>('whatsapp');
+  const platform = BROADCAST_PLATFORMS.find((p) => p.id === activePlatform) ?? BROADCAST_PLATFORMS[0]!;
   const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -67,17 +81,25 @@ export default function WhatsAppBroadcastPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
+  // The draft message is kept across platforms so it can be posted to each in turn;
+  // group selection is per platform, so it is cleared.
+  const handlePlatformSwitch = useCallback((id: BroadcastPlatformId) => {
+    setActivePlatform(id);
+    setSelectedIds(new Set());
+  }, []);
+
   // Groups are loaded from Supabase DB — fast on every page load
   const {
-    data: groups = [],
+    data: whatsappGroups = [],
     isLoading: groupsLoading,
     isError: groupsError,
     error: groupsErrorMsg,
     refetch: refetchGroups,
   } = api.whatsapp.getGroups.useQuery(
     { accountId: activeAccount },
-    { staleTime: 5 * 60 * 1000 },
+    { staleTime: 5 * 60 * 1000, enabled: platform.connected },
   );
+  const groups = platform.connected ? whatsappGroups : NO_GROUPS;
 
   const syncMutation = api.whatsapp.syncGroups.useMutation({
     onSuccess: (result) => {
@@ -89,10 +111,10 @@ export default function WhatsAppBroadcastPage() {
   });
 
   const isRefreshing = syncMutation.isPending;
-  const isLoading = groupsLoading || isRefreshing;
+  const isLoading = platform.connected && (groupsLoading || isRefreshing);
 
   // Show empty state if DB has no groups yet (first use)
-  const notFetchedYet = groups.length === 0 && !groupsLoading && !groupsError;
+  const notFetchedYet = groups.length === 0 && (!platform.connected || (!groupsLoading && !groupsError));
 
   const handleToggle = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -112,9 +134,13 @@ export default function WhatsAppBroadcastPage() {
   }, []);
 
   const handleRefresh = useCallback(() => {
+    if (!platform.connected) {
+      toast(`${platform.name} isn't set up yet, so there are no groups to pull.`);
+      return;
+    }
     setSelectedIds(new Set());
     syncMutation.mutate({ accountId: activeAccount });
-  }, [syncMutation, activeAccount]);
+  }, [syncMutation, activeAccount, platform]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(e.target.files ?? []);
@@ -218,7 +244,7 @@ export default function WhatsAppBroadcastPage() {
   const handleSend = useCallback(async () => {
     const hasMessage = message.trim().length > 0;
     const hasImage = attachments.length > 0;
-    if ((!hasMessage && !hasImage) || selectedIds.size === 0 || isSending) return;
+    if (!platform.connected || (!hasMessage && !hasImage) || selectedIds.size === 0 || isSending) return;
 
     setIsSending(true);
     const ids = Array.from(selectedIds);
@@ -268,31 +294,33 @@ export default function WhatsAppBroadcastPage() {
     } finally {
       setIsSending(false);
     }
-  }, [message, attachments, selectedIds, isSending, activeAccount, groups]);
+  }, [message, attachments, selectedIds, isSending, activeAccount, groups, platform.connected]);
 
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
 
   const canSend =
+    platform.connected &&
     (message.trim().length > 0 || attachments.length > 0) &&
     selectedIds.size > 0 &&
     !isSending &&
     !isLoadingReuseImage;
 
   return (
-    <div className="p-6 md:p-8 space-y-6">
+    <div className="p-6 md:p-8 space-y-6" style={{ '--pc': platform.color } as React.CSSProperties}>
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#25D366]/10 flex items-center justify-center shrink-0">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="#25D366">
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-            </svg>
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors"
+            style={{ backgroundColor: `${platform.color}1a`, color: platform.color }}
+          >
+            <PlatformIcon platform={platform.id} />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-(--color-text-primary)">WhatsApp Broadcast</h1>
-            <p className="text-sm text-(--color-text-muted) mt-0.5">Send messages to your WhatsApp groups</p>
+            <h1 className="text-xl font-semibold text-(--color-text-primary)">Broadcast</h1>
+            <p className="text-sm text-(--color-text-muted) mt-0.5">Send messages to your WhatsApp, Telegram and Signal groups</p>
           </div>
         </div>
 
@@ -313,9 +341,35 @@ export default function WhatsAppBroadcastPage() {
         </button>
       </div>
 
+      {/* Platform Tabs */}
+      <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit max-w-full flex-wrap">
+        {BROADCAST_PLATFORMS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => handlePlatformSwitch(p.id)}
+            className={`
+              flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all
+              ${activePlatform === p.id
+                ? 'bg-white shadow-sm text-(--color-text-primary) border border-(--color-border-subtle)'
+                : 'text-(--color-text-muted) hover:text-(--color-text-secondary) hover:bg-(--color-bg-hover)'
+              }
+            `}
+          >
+            <span style={{ color: p.color }}><PlatformIcon platform={p.id} size={15} /></span>
+            {p.name}
+          </button>
+        ))}
+      </div>
+
       {/* Account Tabs */}
       <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit">
-        {WHATSAPP_ACCOUNTS.map((account) => (
+        {!platform.connected && (
+          <span className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-white shadow-sm text-(--color-text-primary) border border-(--color-border-subtle)">
+            <span className="w-2 h-2 rounded-full shrink-0 bg-(--pc)" />
+            {platform.accountLabel}
+          </span>
+        )}
+        {platform.connected && WHATSAPP_ACCOUNTS.map((account) => (
           <button
             key={account.id}
             onClick={() => handleAccountSwitch(account.id)}
@@ -412,7 +466,7 @@ export default function WhatsAppBroadcastPage() {
                 )}
 
                 {attachments.length < MAX_ATTACHMENTS && (
-                  <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-dashed border-(--color-border-default) hover:border-[#25D366] hover:bg-[#25D366]/5 cursor-pointer transition-all group">
+                  <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-dashed border-(--color-border-default) hover:border-(--pc) hover:bg-(--pc)/5 cursor-pointer transition-all group">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -424,13 +478,13 @@ export default function WhatsAppBroadcastPage() {
                     <svg
                       width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                      className="text-(--color-text-muted) group-hover:text-[#25D366] transition shrink-0"
+                      className="text-(--color-text-muted) group-hover:text-(--pc) transition shrink-0"
                     >
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                       <circle cx="8.5" cy="8.5" r="1.5" />
                       <polyline points="21 15 16 10 5 21" />
                     </svg>
-                    <span className="text-xs text-(--color-text-muted) group-hover:text-[#25D366] transition">
+                    <span className="text-xs text-(--color-text-muted) group-hover:text-(--pc) transition">
                       {attachments.length > 0 ? 'Add another image' : 'Attach image(s)'}{' '}
                       <span className="text-(--color-text-faint)">
                         — optional, max 10MB each, up to {MAX_ATTACHMENTS}
@@ -449,7 +503,7 @@ export default function WhatsAppBroadcastPage() {
                 className={`
                   flex-1 flex items-center justify-center gap-2.5 py-3 rounded-lg text-sm font-semibold transition-all
                   ${canSend
-                    ? 'bg-[#25D366] hover:bg-[#20b858] text-white shadow-sm hover:shadow-md active:scale-[0.98]'
+                    ? 'bg-(--pc) hover:brightness-95 text-white shadow-sm hover:shadow-md active:scale-[0.98]'
                     : 'bg-(--color-bg-hover) text-(--color-text-faint) cursor-not-allowed border border-(--color-border-subtle)'
                   }
                 `}
@@ -515,7 +569,7 @@ export default function WhatsAppBroadcastPage() {
             <GroupSelector
               groups={groups}
               loading={isLoading}
-              isError={groupsError}
+              isError={platform.connected && groupsError}
               errorMessage={groupsErrorMsg?.message}
               notFetchedYet={notFetchedYet}
               selectedIds={selectedIds}
@@ -524,23 +578,60 @@ export default function WhatsAppBroadcastPage() {
               onSelectAll={handleSelectAll}
               onClearAll={handleClearAll}
               onRefresh={handleRefresh}
+              emptyState={platform.connected ? undefined : (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3 bg-(--pc)/10 text-(--pc)">
+                    <PlatformIcon platform={platform.id} />
+                  </div>
+                  <p className="text-sm font-medium text-(--color-text-primary)">No {platform.name} groups yet</p>
+                  <p className="text-xs text-(--color-text-muted) mt-1">Your {platform.name} groups will show here</p>
+                </div>
+              )}
             />
           </div>
         </div>
       </div>
 
-      {/* Scheduled messages list */}
-      <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />
+      {platform.connected ? (
+        <>
+          {/* Scheduled messages list */}
+          <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />
 
-      {/* Broadcast history (immediate sends log) */}
-      <BroadcastHistory
-        accountId={activeAccount}
-        refreshBump={broadcastHistoryBump}
-        onReuse={(entry) => void handleReuseBroadcast(entry)}
-      />
+          {/* Broadcast history (immediate sends log) */}
+          <BroadcastHistory
+            accountId={activeAccount}
+            refreshBump={broadcastHistoryBump}
+            onReuse={(entry) => void handleReuseBroadcast(entry)}
+          />
+        </>
+      ) : (
+        <>
+          {/* Same empty states ScheduledList and BroadcastHistory show, without querying */}
+          <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-(--color-border-subtle)">
+              <h2 className="text-sm font-semibold text-(--color-text-primary)">Scheduled Messages</h2>
+              <p className="text-xs text-(--color-text-muted) mt-0.5">Messages queued to send at a specific time</p>
+            </div>
+            <div className="py-10 flex flex-col items-center gap-1 text-center">
+              <p className="text-sm text-(--color-text-muted)">No scheduled messages</p>
+              <p className="text-xs text-(--color-text-faint)">Use &quot;Schedule Send&quot; to queue a message for later</p>
+            </div>
+          </div>
+          <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-(--color-border-subtle)">
+              <h2 className="text-sm font-semibold text-(--color-text-primary)">Broadcast History</h2>
+              <p className="text-xs text-(--color-text-muted) mt-0.5">Live status of queued and sent broadcasts from this page</p>
+            </div>
+            <div className="py-10 flex flex-col items-center gap-1 text-center">
+              <p className="text-sm text-(--color-text-muted)">No broadcasts sent yet</p>
+              <p className="text-xs text-(--color-text-faint)">Sent messages will appear here</p>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Schedule modal */}
-      <ScheduleModal
+      {platform.connected && <ScheduleModal
         accountId={activeAccount}
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
@@ -548,7 +639,7 @@ export default function WhatsAppBroadcastPage() {
         groupIds={Array.from(selectedIds)}
         groupNames={Array.from(selectedIds).map((id) => groups.find((g) => g.id === id)?.name ?? id)}
         onSuccess={() => setScheduleCreatedBump((n) => n + 1)}
-      />
+      />}
     </div>
   );
 }
