@@ -5,9 +5,9 @@
  * go through the messaging bridge; whatsapp.getPlatforms says whether each platform is
  * set up, and one that isn't renders the page with no groups or history and makes no
  * server calls for it. Clicking the Signal tab while it isn't connected also opens a
- * "not connected yet" popup. The Exchange HQ account under WhatsApp sends to typed or
- * imported phone numbers through WaSender instead of groups, using the same queue with
- * each number as a recipient, and is set up separately from the other WhatsApp accounts.
+ * "not connected yet" popup. The Exchange HQ account under WhatsApp works the same way,
+ * but syncs and sends through WaSender, lists people as well as groups, and is set up
+ * separately from the other WhatsApp accounts.
  *
  * WhatsApp tab: compose and send text messages or images to one or more
  * WhatsApp groups across multiple accounts (aiit-automation, susu-closets, etc.).
@@ -26,7 +26,7 @@
  */
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
@@ -36,9 +36,7 @@ import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledLis
 import { describePending, type PendingSchedule } from '@/lib/schedule-repeat';
 import { SignalNotConnectedModal } from '@/components/modules/whatsapp-groups/SignalNotConnectedModal';
 import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
-import { NumbersInput } from '@/components/modules/broadcast/NumbersInput';
 import { PlatformIcon } from '@/components/modules/broadcast/PlatformIcon';
-import { parsePhoneNumbers } from '@/lib/phone-numbers';
 import { BROADCAST_PLATFORMS } from '@/lib/config/broadcast-platforms';
 import type { BroadcastPlatformId } from '@/lib/config/broadcast-platforms';
 import { accountsForPlatform, isWasender } from '@/lib/config/whatsapp-accounts';
@@ -58,7 +56,7 @@ const NO_GROUPS: WhatsAppGroup[] = [];
 const MAX_CHARS = 1000;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
 const MAX_ATTACHMENTS = 10; // mirrors MAX_ATTACHMENTS_PER_BROADCAST in /api/whatsapp/broadcast
-const MAX_NUMBERS = 200; // mirrors MAX_GROUPS_PER_BROADCAST in /api/whatsapp/broadcast
+const MAX_RECIPIENTS = 200; // mirrors MAX_GROUPS_PER_BROADCAST in /api/whatsapp/broadcast
 
 type Attachment = { file: File; preview: string };
 
@@ -78,18 +76,17 @@ export default function WhatsAppBroadcastPage() {
   const platformConnected = platformInfo?.connected ?? activePlatform === 'whatsapp';
   const accounts = platformInfo?.accounts ?? accountsForPlatform(activePlatform);
   const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
-  // Exchange HQ has its own setup and sends to numbers rather than groups. `connected`
+  // Exchange HQ has its own setup and lists people as well as groups. `connected`
   // describes the active account; the account row uses platformConnected, so the other
   // WhatsApp accounts stay clickable when Exchange HQ isn't set up.
-  const isNumbers = isWasender(activeAccount);
-  const connected = isNumbers
+  const isExchange = isWasender(activeAccount);
+  const connected = isExchange
     ? (platformInfo?.accounts.find((a) => a.id === activeAccount)?.connected ?? false)
     : platformConnected;
-  const notSetUpName = isNumbers
+  const sourceName = isExchange
     ? (accounts.find((a) => a.id === activeAccount)?.name ?? platform.name)
     : platform.name;
-  const [numbersText, setNumbersText] = useState('');
-  const numbers = useMemo(() => parsePhoneNumbers(numbersText).numbers, [numbersText]);
+  const listNoun = isExchange ? 'groups and chats' : 'groups';
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -143,23 +140,25 @@ export default function WhatsAppBroadcastPage() {
     refetch: refetchGroups,
   } = api.whatsapp.getGroups.useQuery(
     { accountId: activeAccount },
-    { staleTime: 5 * 60 * 1000, enabled: connected && !isNumbers },
+    { staleTime: 5 * 60 * 1000, enabled: connected },
   );
-  const groups = connected && !isNumbers ? whatsappGroups : NO_GROUPS;
-  const recipientCount = isNumbers ? numbers.length : selectedIds.size;
-  const recipientWord = isNumbers ? 'number' : 'group';
+  const groups = connected ? whatsappGroups : NO_GROUPS;
+  const recipientCount = selectedIds.size;
+  const recipientWord = isExchange ? 'chat' : 'group';
+  // Only Exchange HQ's list can realistically pass the server's limit.
+  const overLimit = isExchange && recipientCount > MAX_RECIPIENTS;
 
   const syncMutation = api.whatsapp.syncGroups.useMutation({
     onSuccess: (result) => {
-      const label = result.synced !== null ? `Synced ${result.synced} groups from ${platform.name}` : `Groups synced from ${platform.name}`;
+      const label = result.synced !== null ? `Synced ${result.synced} ${listNoun} from ${sourceName}` : `Groups synced from ${sourceName}`;
       toast.success(label, { duration: 6000 });
       void refetchGroups();
     },
-    onError: (err) => toast.error(`Failed to pull groups: ${err.message}`, { duration: 6000 }),
+    onError: (err) => toast.error(`Failed to pull ${listNoun}: ${err.message}`, { duration: 6000 }),
   });
 
   const isRefreshing = syncMutation.isPending;
-  const isLoading = connected && !isNumbers && (groupsLoading || isRefreshing);
+  const isLoading = connected && (groupsLoading || isRefreshing);
 
   // Show empty state if DB has no groups yet (first use)
   const notFetchedYet = groups.length === 0 && (!connected || (!groupsLoading && !groupsError));
@@ -183,12 +182,12 @@ export default function WhatsAppBroadcastPage() {
 
   const handleRefresh = useCallback(() => {
     if (!connected) {
-      toast(`${notSetUpName} isn't set up yet, so there are no groups to pull.`);
+      toast(`${sourceName} isn't set up yet, so there are no ${listNoun} to pull.`);
       return;
     }
     setSelectedIds(new Set());
     syncMutation.mutate({ accountId: activeAccount });
-  }, [syncMutation, activeAccount, notSetUpName, connected]);
+  }, [syncMutation, activeAccount, sourceName, listNoun, connected]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(e.target.files ?? []);
@@ -293,10 +292,10 @@ export default function WhatsAppBroadcastPage() {
     const hasMessage = message.trim().length > 0;
     const hasImage = attachments.length > 0;
     if (!connected || (!hasMessage && !hasImage) || recipientCount === 0 || isSending) return;
-    if (isNumbers && numbers.length > MAX_NUMBERS) return;
+    if (overLimit) return;
 
     setIsSending(true);
-    const ids = isNumbers ? numbers : Array.from(selectedIds);
+    const ids = Array.from(selectedIds);
     const names = ids.map((id) => groups.find((g) => g.id === id)?.name ?? id);
 
     try {
@@ -319,7 +318,6 @@ export default function WhatsAppBroadcastPage() {
       setMessage('');
       setAttachments([]);
       setSelectedIds(new Set());
-      setNumbersText('');
       if (fileInputRef.current) fileInputRef.current.value = '';
       setBroadcastHistoryBump((n) => n + 1);
 
@@ -344,13 +342,13 @@ export default function WhatsAppBroadcastPage() {
     } finally {
       setIsSending(false);
     }
-  }, [message, attachments, selectedIds, isSending, activeAccount, groups, connected, isNumbers, numbers, recipientCount, recipientWord]);
+  }, [message, attachments, selectedIds, isSending, activeAccount, groups, connected, overLimit, recipientCount, recipientWord]);
 
   // The blue "Schedule" button: saves the pending schedule as a scheduled_messages
   // row (nothing is sent now), then clears the composer exactly like handleSend.
   const scheduleMutation = api.whatsapp.scheduleMessage.useMutation();
   const handleSchedule = useCallback(async () => {
-    if (!pendingSchedule || isSending || isNumbers) return;
+    if (!pendingSchedule || isSending) return;
     const text = message.trim();
     if (!connected || !text || selectedIds.size === 0 || attachments.length > 0) return;
     if (new Date(pendingSchedule.scheduledAt).getTime() <= Date.now()) {
@@ -373,7 +371,6 @@ export default function WhatsAppBroadcastPage() {
       setMessage('');
       setAttachments([]);
       setSelectedIds(new Set());
-      setNumbersText('');
       setPendingSchedule(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setScheduleCreatedBump((n) => n + 1);
@@ -383,7 +380,7 @@ export default function WhatsAppBroadcastPage() {
     } finally {
       setIsSending(false);
     }
-  }, [pendingSchedule, isSending, isNumbers, message, connected, selectedIds, attachments, activeAccount, groups, scheduleMutation]);
+  }, [pendingSchedule, isSending, message, connected, selectedIds, attachments, activeAccount, groups, scheduleMutation]);
 
   const charCount = message.length;
   const charCountColor =
@@ -393,12 +390,12 @@ export default function WhatsAppBroadcastPage() {
     connected &&
     (message.trim().length > 0 || attachments.length > 0) &&
     recipientCount > 0 &&
-    !(isNumbers && numbers.length > MAX_NUMBERS) &&
+    !overLimit &&
     !isSending &&
     !isLoadingReuseImage;
 
-  // Schedules carry text only (no attachments), on group accounts only.
-  const scheduleMode = pendingSchedule !== null && !isNumbers;
+  // Schedules carry text only (no attachments).
+  const scheduleMode = pendingSchedule !== null;
   const scheduleBlockedByImages = scheduleMode && attachments.length > 0;
   const canSchedule = canSend && message.trim().length > 0 && attachments.length === 0;
   const mainEnabled = scheduleMode ? canSchedule : canSend;
@@ -420,7 +417,7 @@ export default function WhatsAppBroadcastPage() {
           </div>
         </div>
 
-        {!isNumbers && <button
+        <button
           onClick={handleRefresh}
           disabled={isLoading}
           className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-(--color-border-default) bg-white text-(--color-text-secondary) hover:bg-(--color-bg-hover) hover:border-(--color-border-strong) disabled:opacity-50 disabled:cursor-not-allowed transition-all"
@@ -434,7 +431,7 @@ export default function WhatsAppBroadcastPage() {
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
           {isLoading ? 'Refreshing...' : 'Refresh groups'}
-        </button>}
+        </button>
       </div>
 
       {/* Platform Tabs */}
@@ -492,7 +489,7 @@ export default function WhatsAppBroadcastPage() {
           <div className="px-5 py-4 border-b border-(--color-border-subtle)">
             <h2 className="text-sm font-semibold text-(--color-text-primary)">Compose Message</h2>
             <p className="text-xs text-(--color-text-muted) mt-0.5">
-              Add a message, image, or both — sent to all {isNumbers ? 'numbers' : 'selected groups'}
+              Add a message, image, or both — sent to all selected {isExchange ? 'chats' : 'groups'}
             </p>
           </div>
 
@@ -567,7 +564,7 @@ export default function WhatsAppBroadcastPage() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept={isNumbers ? 'image/jpeg,image/png' : 'image/*'}
+                      accept={isExchange ? 'image/jpeg,image/png' : 'image/*'}
                       multiple
                       onChange={handleImageSelect}
                       className="hidden"
@@ -584,7 +581,7 @@ export default function WhatsAppBroadcastPage() {
                     <span className="text-xs text-(--color-text-muted) group-hover:text-(--pc) transition">
                       {attachments.length > 0 ? 'Add another image' : 'Attach image(s)'}{' '}
                       <span className="text-(--color-text-faint)">
-                        — optional, {isNumbers ? 'JPEG or PNG, max 5MB' : 'max 10MB'} each, up to {MAX_ATTACHMENTS}
+                        — optional, {isExchange ? 'JPEG or PNG, max 5MB' : 'max 10MB'} each, up to {MAX_ATTACHMENTS}
                       </span>
                     </span>
                   </label>
@@ -671,7 +668,7 @@ export default function WhatsAppBroadcastPage() {
               </button>
 
               {/* Schedule: opens the modal to set a time; the chip above replaces it once set */}
-              {!isNumbers && !scheduleMode && <button
+              {!scheduleMode && <button
                 onClick={() => setScheduleModalOpen(true)}
                 disabled={!connected}
                 title="Schedule message for later"
@@ -697,7 +694,12 @@ export default function WhatsAppBroadcastPage() {
             <p className="text-xs text-(--color-text-faint) leading-relaxed">
               Sends run in the background — once queued you can compose the next message
               or close this tab. Live progress appears in Broadcast History below.
-              {isNumbers && ' "Reply STOP to opt out." is added to the end of every message.'}
+              {isExchange && ' "Reply STOP to opt out." is added to messages sent to people, not to groups.'}
+              {overLimit && (
+                <span className="block mt-1 text-amber-600">
+                  Select {MAX_RECIPIENTS} chats or fewer and send the rest as a second broadcast.
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -705,16 +707,14 @@ export default function WhatsAppBroadcastPage() {
         {/* Right: Group selector */}
         <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-(--color-border-subtle)">
-            <h2 className="text-sm font-semibold text-(--color-text-primary)">{isNumbers ? 'Phone Numbers' : 'Select Groups'}</h2>
+            <h2 className="text-sm font-semibold text-(--color-text-primary)">{isExchange ? 'Select Groups and Chats' : 'Select Groups'}</h2>
             <p className="text-xs text-(--color-text-muted) mt-0.5">
-              {isNumbers ? 'Type or paste numbers, or import a CSV or Excel file' : 'Choose which groups to broadcast to'}
+              {isExchange ? 'Choose which groups and people to broadcast to' : 'Choose which groups to broadcast to'}
             </p>
           </div>
 
           <div className="p-5" style={{ height: '460px', display: 'flex', flexDirection: 'column' }}>
-            {isNumbers && connected ? (
-              <NumbersInput text={numbersText} onTextChange={setNumbersText} maxNumbers={MAX_NUMBERS} />
-            ) : <GroupSelector
+            <GroupSelector
               groups={groups}
               loading={isLoading}
               isError={connected && groupsError}
@@ -726,18 +726,19 @@ export default function WhatsAppBroadcastPage() {
               onSelectAll={handleSelectAll}
               onClearAll={handleClearAll}
               onRefresh={handleRefresh}
+              mixedChats={isExchange}
               emptyState={connected ? undefined : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3 bg-(--pc)/10 text-(--pc)">
                     <PlatformIcon platform={platform.id} />
                   </div>
-                  <p className="text-sm font-medium text-(--color-text-primary)">{notSetUpName} isn&apos;t set up yet</p>
+                  <p className="text-sm font-medium text-(--color-text-primary)">{sourceName} isn&apos;t set up yet</p>
                   <p className="text-xs text-(--color-text-muted) mt-1">
-                    {isNumbers ? 'You can add phone numbers here once it is connected' : `Your ${platform.name} groups will show here once it is connected`}
+                    Your {isExchange ? 'groups and chats' : `${platform.name} groups`} will show here once it is connected
                   </p>
                 </div>
               )}
-            />}
+            />
           </div>
         </div>
       </div>
@@ -745,7 +746,7 @@ export default function WhatsAppBroadcastPage() {
       {connected ? (
         <>
           {/* Scheduled messages list */}
-          {!isNumbers && <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />}
+          <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />
 
           {/* Broadcast history (immediate sends log) */}
           <BroadcastHistory
@@ -757,7 +758,7 @@ export default function WhatsAppBroadcastPage() {
       ) : (
         <>
           {/* Same empty states ScheduledList and BroadcastHistory show, without querying */}
-          {!isNumbers && <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
+          <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-(--color-border-subtle)">
               <h2 className="text-sm font-semibold text-(--color-text-primary)">Scheduled Messages</h2>
               <p className="text-xs text-(--color-text-muted) mt-0.5">Messages queued to send at a specific time</p>
@@ -766,7 +767,7 @@ export default function WhatsAppBroadcastPage() {
               <p className="text-sm text-(--color-text-muted)">No scheduled messages</p>
               <p className="text-xs text-(--color-text-faint)">Use &quot;Schedule Send&quot; to queue a message for later</p>
             </div>
-          </div>}
+          </div>
           <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-(--color-border-subtle)">
               <h2 className="text-sm font-semibold text-(--color-text-primary)">Broadcast History</h2>
@@ -783,7 +784,7 @@ export default function WhatsAppBroadcastPage() {
       {/* Schedule modal */}
       {/* "set" mode saves nothing: it sets pendingSchedule, and the blue Schedule
           button (handleSchedule) creates the row. */}
-      {connected && !isNumbers && <ScheduleModal
+      {connected && <ScheduleModal
         mode="set"
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}

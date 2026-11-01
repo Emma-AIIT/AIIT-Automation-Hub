@@ -14,7 +14,7 @@
     "preview": "next build && next start",
     "start": "next start",
     "telegram-login": "node scripts/telegram-login.mjs",
-    "test": "node --test tests/telegram.test.mjs tests/schedule-repeat.test.mjs tests/phone-numbers.test.mjs",
+    "test": "node --test tests/telegram.test.mjs tests/schedule-repeat.test.mjs tests/wasender-chats.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -32,7 +32,6 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.6.0",
-    "read-excel-file": "^9.3.14",
     "recharts": "^3.7.0",
     "server-only": "^0.0.1",
     "superjson": "^2.2.1",

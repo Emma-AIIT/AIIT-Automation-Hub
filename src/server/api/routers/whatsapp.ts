@@ -17,6 +17,9 @@
  *   - telegram-ali in Telegram direct mode (TELEGRAM_API_ID/_API_HASH/_SESSION set)
  *     skips the bridge: syncGroups lists chats with GramJS in this function
  *     (src/lib/server/telegram.ts) and the cron sends the same way.
+ *   - wasender-numbers (Exchange HQ) is the same idea: syncGroups reads the number's
+ *     groups and contacts from WaSender (src/lib/server/wasender.ts) into
+ *     whatsapp_groups, and the cron sends through WaSender.
  *
  * All procedures accept `accountId` to scope operations to a specific WhatsApp account.
  * getWebhookUrl() resolves the correct Make.com webhook URL for each account + action.
@@ -205,11 +208,37 @@ const bridgeGroupsSchema = z.object({
   groups: z.array(z.object({ id: z.string().min(1), name: z.string() })),
 });
 
+/** Supabase returns at most this many rows per request. */
+const SUPABASE_PAGE_SIZE = 1000;
+
+/**
+ * All of an account's whatsapp_groups rows, by name. Reads page by page because an
+ * Exchange HQ contact list can pass the per-request limit, which would otherwise cut
+ * the list short with no error.
+ */
+async function readAccountGroups(accountId: WhatsAppAccountId): Promise<WhatsAppGroup[]> {
+  const supabase = createAdminClient();
+  const rows: WhatsAppGroup[] = [];
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("whatsapp_groups")
+      .select("id, name")
+      .eq("account_id", accountId)
+      .order("name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + SUPABASE_PAGE_SIZE - 1);
+    if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+    rows.push(...((data ?? []) as WhatsAppGroup[]));
+    if ((data?.length ?? 0) < SUPABASE_PAGE_SIZE) return rows;
+  }
+}
+
 /**
  * Mirrors what the Make.com scenario does for WhatsApp: upserts the bridge's groups
  * into whatsapp_groups for this account (PK id + account_id) and removes the
  * account's rows the bridge no longer returns (groups left or deleted).
- * Telegram direct mode (listTelegramGroups) feeds its list through here too.
+ * Telegram direct mode (listTelegramGroups) and Exchange HQ (listWasenderChats) feed
+ * their lists through here too.
  */
 async function writeBridgeGroups(accountId: WhatsAppAccountId, groups: WhatsAppGroup[]): Promise<void> {
   const supabase = createAdminClient();
@@ -225,14 +254,9 @@ async function writeBridgeGroups(accountId: WhatsAppAccountId, groups: WhatsAppG
     if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
   }
 
-  const { data: existing, error: readError } = await supabase
-    .from("whatsapp_groups")
-    .select("id")
-    .eq("account_id", accountId);
-  if (readError) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: readError.message });
-
+  const existing = await readAccountGroups(accountId);
   const keep = new Set(unique.map((g) => g.id));
-  const stale = (existing ?? []).map((r) => (r as { id: string }).id).filter((id) => !keep.has(id));
+  const stale = existing.map((r) => r.id).filter((id) => !keep.has(id));
   if (stale.length > 0) {
     const { error } = await supabase
       .from("whatsapp_groups")
@@ -247,16 +271,7 @@ export const whatsappRouter = createTRPCRouter({
   // Reads from Supabase DB cache — fast, no Make.com call
   getGroups: publicProcedure
     .input(z.object({ accountId: accountIdSchema }))
-    .query(async ({ input }): Promise<WhatsAppGroup[]> => {
-      const supabase = createAdminClient();
-      const { data, error } = await supabase
-        .from("whatsapp_groups")
-        .select("id, name")
-        .eq("account_id", input.accountId)
-        .order("name", { ascending: true });
-      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
-      return (data ?? []) as WhatsAppGroup[];
-    }),
+    .query(({ input }): Promise<WhatsAppGroup[]> => readAccountGroups(input.accountId)),
 
   // Which Broadcast platforms are set up, and their accounts. broadcast-platforms.ts is
   // client-safe and can't read server env, so the page asks here. WhatsApp is always
@@ -308,6 +323,36 @@ export const whatsappRouter = createTRPCRouter({
         }
         await writeBridgeGroups(input.accountId, groups);
         return { success: true, synced: groups.length as number | null };
+      }
+
+      // Exchange HQ: read the number's groups and contacts from WaSender here. Every
+      // list is fetched before anything is written, so a failure changes nothing.
+      if (isWasender(input.accountId)) {
+        if (!isBroadcastConfigured(input.accountId)) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Exchange HQ isn't set up yet." });
+        }
+        let chats: WhatsAppGroup[];
+        try {
+          const { listWasenderChats } = await import("~/lib/server/wasender");
+          chats = await listWasenderChats();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Exchange HQ: could not list chats";
+          await sendAlertEmail(
+            `[AIIT Hub] Exchange HQ refresh FAILED (${input.accountId})`,
+            `The "Refresh groups" sync could not list WhatsApp chats.\n\nAccount: ${input.accountId}\nError: ${msg}`,
+          );
+          throw new TRPCError({ code: "BAD_GATEWAY", message: msg });
+        }
+        // An empty list right after linking only means WhatsApp is still syncing, so
+        // keep what is on the page rather than wipe it.
+        if (chats.length === 0) {
+          throw new TRPCError({
+            code: "BAD_GATEWAY",
+            message: "Exchange HQ: WaSender returned no groups or chats yet, so the list was left as it is. Try again in a few minutes.",
+          });
+        }
+        await writeBridgeGroups(input.accountId, chats);
+        return { success: true, synced: chats.length as number | null };
       }
 
       const webhookUrl = getWebhookUrl(input.accountId, "syncGroups");

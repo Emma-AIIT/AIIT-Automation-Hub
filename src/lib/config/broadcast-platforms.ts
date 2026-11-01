@@ -7,7 +7,7 @@
  * Each platform's accounts live in whatsapp-accounts.ts (every account is just an
  * account_id in the queue tables):
  *   - WhatsApp sends via Make.com scenarios and Green API, except the Exchange HQ
- *     account, which sends to phone numbers through WaSender.
+ *     account, which syncs and sends through WaSender.
  *   - Telegram posts from Ali's own account and Signal from a linked number, both
  *     through the messaging bridge (services/messaging-bridge).
  * Whether a platform is set up depends on server env, so it is not stored here: the
