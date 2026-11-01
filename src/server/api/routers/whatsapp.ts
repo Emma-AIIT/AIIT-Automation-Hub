@@ -36,6 +36,7 @@ import {
   getWebhookUrl,
   isBroadcastConfigured,
   isTelegramDirect,
+  isWasender,
 } from "~/lib/config/whatsapp-accounts";
 import { BROADCAST_PLATFORMS } from "~/lib/config/broadcast-platforms";
 import { sendAlertEmail } from "~/lib/server/alerts";
@@ -236,15 +237,23 @@ export const whatsappRouter = createTRPCRouter({
   // client-safe and can't read server env, so the page asks here. WhatsApp is always
   // connected (an unset Make webhook surfaces its own error on use, as before);
   // Telegram/Signal are connected once every account has its bridge sync + send URLs.
+  // Each account has its own `connected` too, which matches its platform except for
+  // Exchange HQ: it needs WASENDER_API_KEY, and without one only that account is off.
   getPlatforms: publicProcedure.query(() =>
     BROADCAST_PLATFORMS.map((p) => {
       const accounts = accountsForPlatform(p.id);
+      const connected =
+        p.id === "whatsapp" ||
+        (accounts.length > 0 && accounts.every((a) => isBroadcastConfigured(a.id)));
       return {
         id: p.id,
-        connected:
-          p.id === "whatsapp" ||
-          (accounts.length > 0 && accounts.every((a) => isBroadcastConfigured(a.id))),
-        accounts: accounts.map((a) => ({ id: a.id, name: a.name, color: a.color })),
+        connected,
+        accounts: accounts.map((a) => ({
+          id: a.id,
+          name: a.name,
+          color: a.color,
+          connected: isWasender(a.id) ? isBroadcastConfigured(a.id) : connected,
+        })),
       };
     }),
   ),

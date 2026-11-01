@@ -10,6 +10,11 @@
  *   - aiit-automation: AIIT Automation (fully active)
  *   - aiit-business:   AIIT Business Account
  *
+ * One WhatsApp account works differently and has neither of those:
+ *   - wasender-numbers: Exchange HQ, sends to typed or imported phone numbers through
+ *     WaSender (isWasender). It has no groups or Make.com scenarios, so it appears on
+ *     Broadcast only. Pages built on groups use groupAccountsForPlatform to leave it out.
+ *
  * Telegram and Signal accounts are served by the messaging bridge
  * (services/messaging-bridge, see its SETUP.md), which the Hub calls directly:
  *   - telegram-ali: Ali's own Telegram account (GramJS)
@@ -70,14 +75,22 @@ export const WHATSAPP_ACCOUNTS: WhatsAppAccount[] = [
   { id: 'aiit-business',   name: 'AIIT Business Account', color: 'amber', platform: 'whatsapp' },
   // { id: 'susu-closets',    name: 'Susu Closets',    color: 'pink', platform: 'whatsapp' },   // not set up yet
   // { id: 'gim-foundation',  name: 'GIM Foundation',  color: 'green', platform: 'whatsapp' },  // not set up yet
+  { id: 'wasender-numbers', name: 'Exchange HQ', color: 'emerald', platform: 'whatsapp' },
   { id: 'telegram-ali',    name: "Ali's account", color: 'sky', platform: 'telegram' },
   { id: 'signal-aiit',     name: 'AIIT Signal', color: 'indigo', platform: 'signal' },
-  { id: 'wasender-numbers', name: 'WaSender', color: 'emerald', platform: 'numbers' },
 ];
 
 /** Accounts on one platform, in display order. */
 export function accountsForPlatform(platform: BroadcastPlatformId): WhatsAppAccount[] {
   return WHATSAPP_ACCOUNTS.filter((a) => a.platform === platform);
+}
+
+/**
+ * Accounts on one platform that have groups and participants, for every page except
+ * Broadcast. Leaves out Exchange HQ, which only sends to phone numbers.
+ */
+export function groupAccountsForPlatform(platform: BroadcastPlatformId): WhatsAppAccount[] {
+  return accountsForPlatform(platform).filter((a) => !isWasender(a.id));
 }
 
 /** Platform of an account id, falling back to WhatsApp for unknown (legacy) ids. */
@@ -169,7 +182,7 @@ export function isTelegramDirect(accountId: string): boolean {
   return accountId === 'telegram-ali' && getTelegramMode() === 'direct';
 }
 
-/** True when this account sends to phone numbers through WaSender rather than a URL. */
+/** True when this account sends to phone numbers through WaSender rather than a URL. Client-safe. */
 export function isWasender(accountId: string): boolean {
   return accountId === 'wasender-numbers';
 }

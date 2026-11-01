@@ -59,7 +59,7 @@ export const env = createEnv({
     TELEGRAM_API_ID: z.coerce.number().int().positive().optional(),
     TELEGRAM_API_HASH: z.string().min(1).optional(),
     TELEGRAM_SESSION: z.string().min(1).optional(),
-    // WaSender session key for the Broadcast "New numbers" tab. Never log it.
+    // WaSender session key for the Exchange HQ account on Broadcast. Never log it.
     WASENDER_API_KEY: z.string().min(1).optional(),
     WHATSAPP_IMPORT_SECRET: z.string().min(1).optional(),
     WHATSAPP_ALERT_EMAIL: z.string().email().optional(),

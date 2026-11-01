@@ -1,5 +1,5 @@
 /**
- * NumbersInput - Recipient list for the Broadcast "New numbers" tab.
+ * NumbersInput - Recipient list for the Broadcast Exchange HQ account.
  * Numbers can be typed or pasted, or imported from a CSV or Excel file, which adds
  * them to the box so they can be checked before sending. Reports the cleaned list to
  * the page through onChange. Files are read in the browser and never uploaded.

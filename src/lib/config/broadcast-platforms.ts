@@ -6,14 +6,15 @@
  *
  * Each platform's accounts live in whatsapp-accounts.ts (every account is just an
  * account_id in the queue tables):
- *   - WhatsApp sends via Make.com scenarios and Green API.
+ *   - WhatsApp sends via Make.com scenarios and Green API, except the Exchange HQ
+ *     account, which sends to phone numbers through WaSender.
  *   - Telegram posts from Ali's own account and Signal from a linked number, both
  *     through the messaging bridge (services/messaging-bridge).
  * Whether a platform is set up depends on server env, so it is not stored here: the
- * page asks whatsapp.getPlatforms, which reports `connected` per platform.
+ * page asks whatsapp.getPlatforms, which reports `connected` per platform and per account.
  */
 
-export type BroadcastPlatformId = 'whatsapp' | 'telegram' | 'signal' | 'numbers';
+export type BroadcastPlatformId = 'whatsapp' | 'telegram' | 'signal';
 
 export type BroadcastPlatform = {
   id: BroadcastPlatformId;
@@ -26,6 +27,4 @@ export const BROADCAST_PLATFORMS: BroadcastPlatform[] = [
   { id: 'whatsapp', name: 'WhatsApp', color: '#25D366' },
   { id: 'telegram', name: 'Telegram', color: '#229ED9' },
   { id: 'signal', name: 'Signal', color: '#3A76F0' },
-  // WhatsApp to individual phone numbers through WaSender, not to groups
-  { id: 'numbers', name: 'New numbers', color: '#128C7E' },
 ];

@@ -1,6 +1,6 @@
 /**
  * WaSender client: sends one WhatsApp message to a phone number.
- * Used by drainBroadcastQueue for the "New numbers" account, so these sends get the
+ * Used by drainBroadcastQueue for the Exchange HQ account, so these sends get the
  * same pacing, pause/cancel and history as group broadcasts. SERVER-SIDE ONLY.
  *
  * API: POST /api/send-message with a Bearer key and JSON { to, text?, imageUrl? }.
@@ -33,7 +33,7 @@ async function post(body: Record<string, string>): Promise<void> {
   } catch (err) {
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       const timeout = new Error(
-        `WaSender did not respond within ${SEND_TIMEOUT_MS / 1000}s, so it is unknown whether ` +
+        `Exchange HQ did not respond within ${SEND_TIMEOUT_MS / 1000}s, so it is unknown whether ` +
           `this number received the message. It was NOT re-sent, to avoid sending twice.`,
       );
       timeout.name = 'TimeoutError';
@@ -44,7 +44,7 @@ async function post(body: Record<string, string>): Promise<void> {
 
   if (!res.ok) {
     const json = (await res.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(`WaSender: ${json?.message ?? `HTTP ${res.status}`}`);
+    throw new Error(`Exchange HQ: ${json?.message ?? `HTTP ${res.status}`}`);
   }
 }
 

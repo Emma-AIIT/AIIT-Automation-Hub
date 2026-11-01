@@ -47,6 +47,18 @@
 
 ## 📝 Changelog Entries
 
+### 2026-11-02 - Broadcast: New numbers becomes the Exchange HQ WhatsApp account
+
+**Changed**:
+- The top-level "New numbers" platform tab is gone. WaSender sending is now the **Exchange HQ** account under WhatsApp, beside AIIT Automation and AIIT Business Account. The id stays `wasender-numbers`, so the queue and history are unchanged; pacing, the 200 number limit and the opt-out line are the same.
+- `whatsapp.getPlatforms` returns `connected` per account as well as per platform. Without `WASENDER_API_KEY` only Exchange HQ shows "isn't set up yet"; the page's account row follows the platform, so you can always switch back.
+- New `groupAccountsForPlatform()` leaves Exchange HQ out of Participants, Chats, the participant CSV import and the phone download.
+- WaSender errors now start with "Exchange HQ", as they show in History and alert emails.
+
+**Testing**: Typecheck, lint, build and `npm test`. Broadcast, Participants and Chats loaded in headless Chrome on a dev server with no Supabase config, once with a dummy `WASENDER_API_KEY` and once with none. No WaSender message was sent, and real group lists were not loaded.
+
+---
+
 ### 2026-11-02 - Broadcast: New numbers tab (WaSender)
 
 **Added**:

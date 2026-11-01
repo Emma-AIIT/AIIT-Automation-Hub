@@ -13,7 +13,7 @@ import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { DashboardGroup } from '@/server/api/routers/whatsapp';
-import { accountsForPlatform } from '@/lib/config/whatsapp-accounts';
+import { groupAccountsForPlatform } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 import { ParticipantMessageHistory } from '@/components/modules/whatsapp-participants/ParticipantMessageHistory';
 
@@ -363,7 +363,7 @@ export default function WhatsAppParticipantsPage() {
 
       {/* Account Tabs */}
       <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit">
-        {accountsForPlatform('whatsapp').map((account) => (
+        {groupAccountsForPlatform('whatsapp').map((account) => (
           <button
             key={account.id}
             onClick={() => handleAccountSwitch(account.id)}
