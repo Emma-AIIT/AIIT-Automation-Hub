@@ -94,6 +94,62 @@ export function nextFutureOccurrence(
   return { at, index };
 }
 
+/**
+ * Which occurrence (counted from repeat_anchor_at) a series is on once `sent`
+ * posts have gone. Editing a series re-anchors it at the new first send and sets
+ * repeat_base_sent = repeat_sent, so sends made before the edit don't count
+ * towards the new anchor. Rows from before v2 have base 0.
+ */
+export function occurrenceIndex(sent: number, baseSent: number | null | undefined): number {
+  return Math.max(0, sent - (baseSent ?? 0));
+}
+
+/** Smallest allowed "Number of times" for a series that has already sent `sent`. */
+export function minRepeatTotal(sent: number): number {
+  return Math.max(REPEAT_MIN, sent + 1);
+}
+
+/**
+ * Where a schedule goes when it is switched back on.
+ *  - Its time is still ahead: unchanged.
+ *  - A repeat whose slot passed while it was off: the next future occurrence
+ *    (missed slots are skipped, not sent late, like the cron).
+ *  - A one-off whose time passed: "needs-new-time"; the person picks one.
+ */
+export function rearmOnEnable(
+  row: {
+    scheduled_at: string;
+    repeat_interval: RepeatInterval | null;
+    repeat_anchor_at: string | null;
+    repeat_sent: number | null;
+    repeat_base_sent: number | null;
+  },
+  now: Date = new Date(),
+): { scheduledAt: string } | "needs-new-time" {
+  if (new Date(row.scheduled_at).getTime() > now.getTime()) return { scheduledAt: row.scheduled_at };
+  const interval = row.repeat_interval ?? "none";
+  if (interval === "none") return "needs-new-time";
+  const anchor = row.repeat_anchor_at ?? row.scheduled_at;
+  const from = occurrenceIndex(row.repeat_sent ?? 0, row.repeat_base_sent);
+  return { scheduledAt: nextFutureOccurrence(anchor, interval, from, now).at.toISOString() };
+}
+
+/** A schedule chosen in the composer but not saved yet (ScheduleModal "set" mode). */
+export type PendingSchedule = {
+  /** ISO UTC */
+  scheduledAt: string;
+  repeatInterval: RepeatInterval;
+  /** Counts the first send; 1 for a one-off. */
+  repeatTotal: number;
+};
+
+/** "Tue 3 Nov 9:40 am" or "Tue 3 Nov 9:40 am, daily ×2" */
+export function describePending(s: PendingSchedule): string {
+  const at = new Date(s.scheduledAt);
+  const when = `${formatRepeatDay(at)} ${formatRepeatTime(at)}`;
+  return s.repeatInterval === "none" ? when : `${when}, ${s.repeatInterval} ×${s.repeatTotal}`;
+}
+
 /** "Mon 3 Nov" */
 export function formatRepeatDay(at: Date): string {
   return formatInTimeZone(at, SCHEDULE_TZ, "EEE d MMM");

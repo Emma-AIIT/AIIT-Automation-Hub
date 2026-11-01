@@ -25,7 +25,7 @@ import { getPlatformName, isSendConfigured, WHATSAPP_ACCOUNTS } from "~/lib/conf
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import { drainBroadcastQueue, enqueueBroadcast } from "~/lib/server/whatsapp-broadcast";
-import { nextFutureOccurrence, type RepeatInterval } from "~/lib/schedule-repeat";
+import { nextFutureOccurrence, occurrenceIndex, type RepeatInterval } from "~/lib/schedule-repeat";
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
@@ -156,6 +156,9 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
     .from("scheduled_messages")
     .select("*")
     .eq("status", "pending")
+    // Switched off from the Scheduled Messages panel: skipped until switched back
+    // on, when setScheduledEnabled moves a passed slot forward.
+    .eq("enabled", true)
     .lte("scheduled_at", new Date().toISOString());
 
   if (error) {
@@ -197,12 +200,15 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
     const sent = ((msg.repeat_sent as number | null) ?? 0) + 1;
     const anchor = (msg.repeat_anchor_at as string | null) ?? (msg.scheduled_at as string);
     const moreToCome = interval !== "none" && sent < total;
+    // An edited series is re-anchored at its new first send; sends made before the
+    // edit (repeat_base_sent) don't count towards the occurrence index.
+    const nextIndex = occurrenceIndex(sent, msg.repeat_base_sent as number | null);
 
     // Claim: either re-arm the series for its next slot or mark it done. Both are
     // conditional on what this tick read, so an overlapping tick claims nothing.
     const claimUpdate = moreToCome
       ? {
-          scheduled_at: nextFutureOccurrence(anchor, interval, sent, new Date()).at.toISOString(),
+          scheduled_at: nextFutureOccurrence(anchor, interval, nextIndex, new Date()).at.toISOString(),
           repeat_sent: sent,
           error: null,
         }
@@ -213,6 +219,7 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
       .update(claimUpdate)
       .eq("id", msg.id)
       .eq("status", "pending")
+      .eq("enabled", true)
       .eq("scheduled_at", msg.scheduled_at as string)
       .select("id");
 
@@ -231,6 +238,8 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
         message: (msg.message as string) ?? null,
         groupIds,
         groupNames,
+        // Links the broadcast back to its schedule for Broadcast History.
+        scheduledMessageId: msg.id as string,
       });
 
       released++;

@@ -5,12 +5,63 @@
  */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import toast from 'react-hot-toast';
 import { api } from '@/trpc/react';
 import type { BroadcastLogEntry } from '@/server/api/routers/whatsapp';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
+import { formatRepeatDay, formatRepeatTime } from '@/lib/schedule-repeat';
+
+/** Blue badge on every broadcast a schedule produced. */
+function ScheduledBadge() {
+  return (
+    <span className="text-[11px] font-medium px-1.5 py-0.5 rounded-full border bg-[#3b82f6]/10 text-[#2563eb] border-[#3b82f6]/30 shrink-0">
+      Scheduled
+    </span>
+  );
+}
+
+type HistoryItem =
+  | { kind: 'single'; entry: BroadcastLogEntry }
+  | {
+      kind: 'series';
+      id: string;
+      /** Newest first, like the list itself. */
+      entries: BroadcastLogEntry[];
+      schedule: BroadcastLogEntry['schedule'];
+    };
+
+/**
+ * Folds every send of a repeating schedule into one entry, placed where its newest
+ * send would be. One-off scheduled sends (and anything with a single linked send
+ * that isn't a series) stay single rows with the badge.
+ */
+function groupHistory(history: BroadcastLogEntry[]): HistoryItem[] {
+  const bySchedule = new Map<string, BroadcastLogEntry[]>();
+  for (const e of history) {
+    if (!e.scheduled_message_id) continue;
+    const list = bySchedule.get(e.scheduled_message_id) ?? [];
+    list.push(e);
+    bySchedule.set(e.scheduled_message_id, list);
+  }
+  const items: HistoryItem[] = [];
+  const placed = new Set<string>();
+  for (const e of history) {
+    const sid = e.scheduled_message_id;
+    const sends = sid ? bySchedule.get(sid) : undefined;
+    const isSeries =
+      !!sid && !!sends && (sends.length > 1 || (e.schedule != null && e.schedule.repeat_interval !== 'none'));
+    if (!isSeries) {
+      items.push({ kind: 'single', entry: e });
+      continue;
+    }
+    if (placed.has(sid)) continue;
+    placed.add(sid);
+    items.push({ kind: 'series', id: sid, entries: sends, schedule: e.schedule });
+  }
+  return items;
+}
 
 const SYDNEY_TZ = 'Australia/Sydney';
 
@@ -159,6 +210,17 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
     { refetchInterval: pollFast ? 4_000 : 60_000 },
   );
 
+  const items = useMemo(() => groupHistory(history), [history]);
+  const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());
+  const toggleSeries = (id: string) => {
+    setExpandedSeries((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const hasActive = history.some((e) => ACTIVE_STATUSES.includes(e.status));
   if (hasActive !== pollFast) setPollFast(hasActive);
 
@@ -283,7 +345,119 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
         </div>
       ) : (
         <div className="divide-y divide-(--color-border-subtle)">
-          {history.map((entry) => {
+          {items.map((item) => {
+            if (item.kind === 'single') return renderEntry(item.entry, false);
+            const { id, entries, schedule } = item;
+            const latest = entries[0]!;
+            const isOpen = expandedSeries.has(id);
+            const activeCount = entries.filter((e) => ACTIVE_STATUSES.includes(e.status)).length;
+            const message = latest.message ?? '';
+            const preview = message.length > 70 ? message.slice(0, 70) + '…' : message;
+            const parts: string[] = [];
+            if (schedule && schedule.repeat_interval !== 'none') {
+              parts.push(`repeats ${schedule.repeat_interval}`);
+              parts.push(`${schedule.repeat_sent} of ${schedule.repeat_total} sent`);
+              if (schedule.status === 'pending') {
+                const next = new Date(schedule.scheduled_at);
+                parts.push(
+                  schedule.enabled === false
+                    ? 'paused'
+                    : `next ${formatRepeatDay(next)} ${formatRepeatTime(next)}`,
+                );
+              } else if (schedule.status === 'cancelled') {
+                parts.push('cancelled');
+              }
+            } else {
+              parts.push(`${entries.length} sends`);
+            }
+            return (
+              <div key={`series-${id}`}>
+                <button
+                  type="button"
+                  onClick={() => toggleSeries(id)}
+                  aria-expanded={isOpen}
+                  className="w-full text-left px-5 py-3.5 min-h-[44px] flex items-start gap-3 hover:bg-(--color-bg-secondary) transition-colors"
+                >
+                  <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[latest.status].dot}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {preview ? (
+                        <p className="text-sm text-(--color-text-primary) leading-snug">{preview}</p>
+                      ) : (
+                        <p className="text-sm text-(--color-text-faint) italic">No message text</p>
+                      )}
+                      <ScheduledBadge />
+                    </div>
+                    <p className="text-xs text-(--color-text-muted) mt-1.5">
+                      {parts.join(' · ')}
+                      {activeCount > 0 && <span className="text-sky-600"> · {activeCount} sending</span>}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-xs text-(--color-text-faint) mt-0.5 flex items-center gap-1">
+                    {isOpen ? 'Hide sends' : `Show sends (${entries.length})`}
+                    <svg
+                      width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      className={`transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="ml-5 mb-2 border-l-2 border-[#3b82f6]/30 divide-y divide-(--color-border-subtle)">
+                    {entries.map((e) => renderEntry(e, true))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* TEMPORARY: delete confirmation - remove together with the delete button */}
+      {confirmDeleteId && (() => {
+        const target = history.find((e) => e.id === confirmDeleteId);
+        return (
+          <>
+            <div
+              className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[1px]"
+              onClick={() => setConfirmDeleteId(null)}
+            />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-xl border border-(--color-border-subtle) w-full max-w-sm p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-(--color-text-primary)">Delete this broadcast?</h3>
+                  <p className="text-xs text-(--color-text-muted) mt-1.5 leading-relaxed">
+                    {target?.message
+                      ? `"${target.message.length > 80 ? target.message.slice(0, 80) + '…' : target.message}"`
+                      : 'This broadcast'}{' '}
+                    will be permanently removed from history, along with any attachments. This cannot be undone.
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="flex-1 py-2.5 rounded-lg border border-(--color-border-default) text-sm font-medium text-(--color-text-secondary) hover:bg-(--color-bg-hover) transition"
+                  >
+                    No, keep it
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate({ accountId, broadcastId: confirmDeleteId })}
+                    disabled={deleteMutation.isPending}
+                    className="flex-1 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 text-sm font-semibold text-white transition"
+                  >
+                    {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+    </div>
+  );
+
+  function renderEntry(entry: BroadcastLogEntry, nested: boolean) {
             const style = STATUS_STYLES[entry.status];
             const isActive = ACTIVE_STATUSES.includes(entry.status);
             const hasError = !!entry.make_error;
@@ -303,7 +477,7 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
             const groupSummary = entry.group_names.slice(0, 2).join(', ');
 
             return (
-              <div key={entry.id} className="px-5 py-3.5 hover:bg-(--color-bg-secondary) transition-colors">
+              <div key={entry.id} className={`${nested ? 'pl-4 pr-5' : 'px-5'} py-3.5 hover:bg-(--color-bg-secondary) transition-colors`}>
                 <div className="flex items-start gap-3">
                   {/* Status dot */}
                   <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
@@ -329,6 +503,8 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                       ) : !entry.has_file ? (
                         <p className="text-sm text-(--color-text-faint) italic">No message text</p>
                       ) : null}
+                      {/* Inside a series entry the header already carries the badge */}
+                      {entry.scheduled_message_id && !nested && <ScheduledBadge />}
                     </div>
 
                     {/* Meta row */}
@@ -502,50 +678,5 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
                 </div>
               </div>
             );
-          })}
-        </div>
-      )}
-
-      {/* TEMPORARY: delete confirmation - remove together with the delete button */}
-      {confirmDeleteId && (() => {
-        const target = history.find((e) => e.id === confirmDeleteId);
-        return (
-          <>
-            <div
-              className="fixed inset-0 bg-black/30 z-40 backdrop-blur-[1px]"
-              onClick={() => setConfirmDeleteId(null)}
-            />
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-xl border border-(--color-border-subtle) w-full max-w-sm p-6 space-y-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-(--color-text-primary)">Delete this broadcast?</h3>
-                  <p className="text-xs text-(--color-text-muted) mt-1.5 leading-relaxed">
-                    {target?.message
-                      ? `"${target.message.length > 80 ? target.message.slice(0, 80) + '…' : target.message}"`
-                      : 'This broadcast'}{' '}
-                    will be permanently removed from history, along with any attachments. This cannot be undone.
-                  </p>
-                </div>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setConfirmDeleteId(null)}
-                    className="flex-1 py-2.5 rounded-lg border border-(--color-border-default) text-sm font-medium text-(--color-text-secondary) hover:bg-(--color-bg-hover) transition"
-                  >
-                    No, keep it
-                  </button>
-                  <button
-                    onClick={() => deleteMutation.mutate({ accountId, broadcastId: confirmDeleteId })}
-                    disabled={deleteMutation.isPending}
-                    className="flex-1 py-2.5 rounded-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 text-sm font-semibold text-white transition"
-                  >
-                    {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        );
-      })()}
-    </div>
-  );
+  }
 }

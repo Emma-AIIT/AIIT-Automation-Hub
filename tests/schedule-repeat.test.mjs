@@ -5,9 +5,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  describePending,
   describeSeries,
+  minRepeatTotal,
   nextFutureOccurrence,
   nextOccurrence,
+  occurrenceIndex,
+  rearmOnEnable,
 } from "../src/lib/schedule-repeat.ts";
 
 const iso = (d) => d.toISOString();
@@ -95,6 +99,85 @@ describe("nextFutureOccurrence", () => {
 
   it("refuses a one-off schedule", () => {
     assert.throws(() => nextFutureOccurrence(anchor, "none", 1));
+  });
+});
+
+describe("occurrenceIndex (edited series)", () => {
+  it("counts from the anchor when the series was never edited", () => {
+    assert.equal(occurrenceIndex(3, 0), 3);
+    assert.equal(occurrenceIndex(3, null), 3);
+  });
+
+  it("subtracts the sends made before the last edit", () => {
+    // 2 of 5 sent, then edited: the new anchor is index 0 for the third send
+    assert.equal(occurrenceIndex(2, 2), 0);
+    assert.equal(occurrenceIndex(3, 2), 1);
+  });
+
+  it("never goes negative", () => {
+    assert.equal(occurrenceIndex(0, 2), 0);
+  });
+
+  it("drives the cron's next slot from the new anchor", () => {
+    // Edited after 2 sends to start Tue 10 Nov 9:00 AEDT, daily. The cron has
+    // just made send 3 (index 0), so the next is index 1 = Wed 11 Nov.
+    const anchor = "2026-11-09T22:00:00.000Z";
+    const now = new Date("2026-11-09T22:00:30.000Z");
+    const next = nextFutureOccurrence(anchor, "daily", occurrenceIndex(3, 2), now);
+    assert.equal(iso(next.at), "2026-11-10T22:00:00.000Z");
+  });
+});
+
+describe("minRepeatTotal", () => {
+  it("is at least 2, and one more than the sends already made", () => {
+    assert.equal(minRepeatTotal(0), 2);
+    assert.equal(minRepeatTotal(1), 2);
+    assert.equal(minRepeatTotal(2), 3);
+  });
+});
+
+describe("rearmOnEnable", () => {
+  const base = {
+    repeat_interval: "daily",
+    repeat_anchor_at: "2026-11-08T22:00:00.000Z", // Mon 9 Nov 9:00 AEDT
+    repeat_sent: 1,
+    repeat_base_sent: 0,
+  };
+
+  it("leaves a future time alone", () => {
+    const now = new Date("2026-11-09T00:00:00.000Z");
+    assert.deepEqual(rearmOnEnable({ ...base, scheduled_at: "2026-11-09T22:00:00.000Z" }, now), {
+      scheduledAt: "2026-11-09T22:00:00.000Z",
+    });
+  });
+
+  it("moves a repeat to its next future slot, skipping missed ones", () => {
+    const now = new Date("2026-11-11T12:00:00.000Z"); // Wed 11 Nov 11 pm
+    assert.deepEqual(rearmOnEnable({ ...base, scheduled_at: "2026-11-09T22:00:00.000Z" }, now), {
+      scheduledAt: "2026-11-11T22:00:00.000Z",
+    });
+  });
+
+  it("asks for a new time on a one-off that has passed", () => {
+    const now = new Date("2026-11-11T12:00:00.000Z");
+    assert.equal(
+      rearmOnEnable(
+        { ...base, repeat_interval: "none", repeat_sent: 0, scheduled_at: "2026-11-09T22:00:00.000Z" },
+        now,
+      ),
+      "needs-new-time",
+    );
+  });
+});
+
+describe("describePending", () => {
+  it("labels a one-off and a series", () => {
+    const at = "2026-11-02T22:40:00.000Z"; // Tue 3 Nov 9:40 am AEDT
+    assert.equal(describePending({ scheduledAt: at, repeatInterval: "none", repeatTotal: 1 }), "Tue 3 Nov 9:40 am");
+    assert.equal(
+      describePending({ scheduledAt: at, repeatInterval: "daily", repeatTotal: 2 }),
+      "Tue 3 Nov 9:40 am, daily ×2",
+    );
   });
 });
 
