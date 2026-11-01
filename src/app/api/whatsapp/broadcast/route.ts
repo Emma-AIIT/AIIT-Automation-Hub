@@ -73,16 +73,21 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    // Exchange HQ's list holds groups and people, so "groups" would misdescribe it.
+    const recipientWord = isWasender(accountId) ? "chats" : "groups";
     if (!Array.isArray(groupIds) || groupIds.length === 0) {
-      return NextResponse.json({ error: "At least one group is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: `At least one ${recipientWord.slice(0, -1)} is required` },
+        { status: 400 },
+      );
     }
     if (groupIds.length > MAX_GROUPS_PER_BROADCAST) {
       const hours = Math.round((groupIds.length * BROADCAST_INTERVAL_MINUTES) / 60);
       return NextResponse.json(
         {
           error:
-            `${groupIds.length} groups at ${BROADCAST_INTERVAL_MINUTES} minutes apart would take about ${hours} hours. ` +
-            `Select ${MAX_GROUPS_PER_BROADCAST} groups or fewer and send the rest as a second broadcast.`,
+            `${groupIds.length} ${recipientWord} at ${BROADCAST_INTERVAL_MINUTES} minutes apart would take about ${hours} hours. ` +
+            `Select ${MAX_GROUPS_PER_BROADCAST} ${recipientWord} or fewer and send the rest as a second broadcast.`,
         },
         { status: 400 },
       );
@@ -109,7 +114,7 @@ export async function POST(req: NextRequest) {
     }
 
     // WaSender takes JPEG and PNG images up to 5MB. Refuse anything else now rather
-    // than failing every number hours later.
+    // than failing every chat hours later.
     if (isWasender(accountId)) {
       const unsupported = files.find(
         (f) => !WASENDER_IMAGE_TYPES.includes(f.type) || f.size > WASENDER_MAX_IMAGE_SIZE,
