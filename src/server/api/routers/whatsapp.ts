@@ -52,7 +52,13 @@ import {
   predictSendTimes,
   BROADCAST_BUCKET,
 } from "~/lib/server/whatsapp-broadcast";
-import { REPEAT_INTERVALS, REPEAT_MAX, type RepeatInterval } from "~/lib/schedule-repeat";
+import {
+  REPEAT_INTERVALS,
+  REPEAT_MAX,
+  minRepeatTotal,
+  rearmOnEnable,
+  type RepeatInterval,
+} from "~/lib/schedule-repeat";
 
 const accountIdSchema = z.enum(
   WHATSAPP_ACCOUNTS.map((a) => a.id) as [WhatsAppAccountId, ...WhatsAppAccountId[]]
@@ -76,6 +82,20 @@ export interface ScheduledMessage {
   repeat_sent: number;
   /** First send time; occurrences are counted from it. Null on pre-repeat rows. */
   repeat_anchor_at: string | null;
+  /** Off = paused: the cron skips it until switched back on. */
+  enabled: boolean;
+  /** repeat_sent when the series was last edited (see occurrenceIndex). */
+  repeat_base_sent: number;
+}
+
+/** The schedule a broadcast came from, as Broadcast History needs it. */
+export interface BroadcastSchedule {
+  repeat_interval: RepeatInterval;
+  repeat_total: number;
+  repeat_sent: number;
+  scheduled_at: string;
+  status: ScheduledMessage["status"];
+  enabled: boolean;
 }
 
 export interface WhatsAppGroup {
@@ -112,6 +132,11 @@ export interface BroadcastLogEntry {
   next_send_at: string | null;
   /** Derived: groups still waiting to be sent. */
   pending_count: number;
+  /** The scheduled_messages row that produced this broadcast, if any. */
+  scheduled_message_id: string | null;
+  /** Derived: that schedule's repeat state. Null for dashboard sends, or once the
+   *  schedule row is gone. */
+  schedule: BroadcastSchedule | null;
 }
 
 /** One group's send status within a broadcast, from whatsapp_broadcast_queue. */
@@ -502,7 +527,35 @@ export const whatsappRouter = createTRPCRouter({
         .limit(50);
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
 
-      const rows = (data ?? []) as BroadcastLogEntry[];
+      // Attach the schedule each scheduled broadcast came from (badge + series
+      // grouping in BroadcastHistory). One query for the whole page.
+      const rawRows = (data ?? []) as (Omit<BroadcastLogEntry, "schedule"> & {
+        scheduled_message_id?: string | null;
+      })[];
+      const scheduleIds = [
+        ...new Set(rawRows.map((r) => r.scheduled_message_id).filter((id): id is string => !!id)),
+      ];
+      const schedules = new Map<string, BroadcastSchedule>();
+      if (scheduleIds.length > 0) {
+        const { data: scheduleRows } = await supabase
+          .from("scheduled_messages")
+          .select("id, repeat_interval, repeat_total, repeat_sent, scheduled_at, status, enabled")
+          .in("id", scheduleIds);
+        for (const s of (scheduleRows ?? []) as (BroadcastSchedule & { id: string })[]) {
+          const { id, ...rest } = s;
+          schedules.set(id, {
+            ...rest,
+            repeat_interval: rest.repeat_interval ?? "none",
+            repeat_total: rest.repeat_total ?? 1,
+            repeat_sent: rest.repeat_sent ?? 0,
+          });
+        }
+      }
+      const rows: BroadcastLogEntry[] = rawRows.map((r) => ({
+        ...r,
+        scheduled_message_id: r.scheduled_message_id ?? null,
+        schedule: r.scheduled_message_id ? (schedules.get(r.scheduled_message_id) ?? null) : null,
+      }));
 
       // Attach live queue progress to anything still in flight. One extra query for
       // the whole page rather than one per row.
@@ -858,21 +911,155 @@ export const whatsappRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  // Returns pending messages + sent/failed messages from the last 24 hours.
-  // Older completed messages are excluded to keep the list manageable.
+  // Active schedules only: pending (switched on or off, including a series part-way
+  // through) and failed (kept, with their error, until deleted). Finished ones
+  // leave the panel; their broadcasts show in Broadcast History, badged Scheduled.
   listScheduled: publicProcedure
     .input(z.object({ accountId: accountIdSchema }))
     .query(async ({ input }): Promise<ScheduledMessage[]> => {
       const supabase = createAdminClient();
-      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("scheduled_messages")
         .select("*")
         .eq("account_id", input.accountId)
-        .or(`status.eq.pending,and(status.in.(sent,failed),sent_at.gte.${cutoff})`)
+        .in("status", ["pending", "failed"])
         .order("scheduled_at", { ascending: true });
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       return (data ?? []) as ScheduledMessage[];
+    }),
+
+  /**
+   * On/off switch. Off: the cron skips the row. On: a time still ahead is kept; a
+   * repeat whose slot passed while off moves to its next future occurrence (missed
+   * slots are skipped, not sent late); a one-off whose time passed is NOT switched
+   * on - needsNewTime tells the page to open the editor (updateScheduled with
+   * enable: true).
+   */
+  setScheduledEnabled: publicProcedure
+    .input(z.object({ id: z.string().uuid(), enabled: z.boolean() }))
+    .mutation(async ({ input }): Promise<{ needsNewTime: boolean; scheduledAt: string | null }> => {
+      const supabase = createAdminClient();
+      const { data, error: readError } = await supabase
+        .from("scheduled_messages")
+        .select("status, scheduled_at, repeat_interval, repeat_anchor_at, repeat_sent, repeat_base_sent")
+        .eq("id", input.id)
+        .single();
+      const row = data as Pick<
+        ScheduledMessage,
+        "status" | "scheduled_at" | "repeat_interval" | "repeat_anchor_at" | "repeat_sent" | "repeat_base_sent"
+      > | null;
+      if (readError || !row) throw new TRPCError({ code: "NOT_FOUND", message: "Schedule not found" });
+      if (row.status !== "pending") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "This schedule has already finished" });
+      }
+
+      let update: { enabled: boolean; scheduled_at?: string } = { enabled: input.enabled };
+      if (input.enabled) {
+        const rearm = rearmOnEnable(row);
+        if (rearm === "needs-new-time") return { needsNewTime: true, scheduledAt: null };
+        update = { enabled: true, scheduled_at: rearm.scheduledAt };
+      }
+
+      // Conditional on what was read, so it can't overwrite a slot the cron just
+      // claimed and re-armed.
+      const { data: updated, error } = await supabase
+        .from("scheduled_messages")
+        .update(update)
+        .eq("id", input.id)
+        .eq("status", "pending")
+        .eq("scheduled_at", row.scheduled_at)
+        .select("scheduled_at");
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      if (!updated || updated.length === 0) {
+        throw new TRPCError({ code: "CONFLICT", message: "This schedule just sent. Refresh and try again." });
+      }
+      return { needsNewTime: false, scheduledAt: (updated[0] as { scheduled_at: string }).scheduled_at };
+    }),
+
+  /**
+   * Edits a pending schedule: message, groups, time and repeat. The series is
+   * re-anchored at the new time and repeat_base_sent records the sends already
+   * made, so the cron's occurrence index restarts from here (occurrenceIndex).
+   * repeatTotal counts every send including those already made, so it must be
+   * above repeat_sent. A one-off edit of a part-sent series means one more send.
+   */
+  updateScheduled: publicProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        message: z.string().trim().min(1).max(1000),
+        groupIds: z.array(z.string()).min(1),
+        groupNames: z.array(z.string()),
+        scheduledAt: z.string().datetime(),
+        repeatInterval: z.enum(REPEAT_INTERVALS),
+        repeatTotal: z.number().int().min(1).max(REPEAT_MAX),
+        /** Also switch it on (used when re-enabling a passed one-off). */
+        enable: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      if (new Date(input.scheduledAt).getTime() <= Date.now()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Scheduled time must be in the future" });
+      }
+      const supabase = createAdminClient();
+      const { data, error: readError } = await supabase
+        .from("scheduled_messages")
+        .select("status, repeat_sent, scheduled_at")
+        .eq("id", input.id)
+        .single();
+      const row = data as { status: ScheduledMessage["status"]; repeat_sent: number | null; scheduled_at: string } | null;
+      if (readError || !row) throw new TRPCError({ code: "NOT_FOUND", message: "Schedule not found" });
+      if (row.status !== "pending") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Only schedules still to come can be edited" });
+      }
+
+      const sent = row.repeat_sent ?? 0;
+      const repeating = input.repeatInterval !== "none";
+      if (repeating && input.repeatTotal < minRepeatTotal(sent)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Number of times must be at least ${minRepeatTotal(sent)} (${sent} already sent)`,
+        });
+      }
+
+      const { data: updated, error } = await supabase
+        .from("scheduled_messages")
+        .update({
+          message: input.message,
+          group_ids: input.groupIds,
+          group_names: input.groupNames,
+          scheduled_at: input.scheduledAt,
+          repeat_interval: repeating ? input.repeatInterval : "none",
+          repeat_total: repeating ? input.repeatTotal : sent + 1,
+          repeat_anchor_at: input.scheduledAt,
+          repeat_base_sent: sent,
+          error: null,
+          ...(input.enable ? { enabled: true } : {}),
+        })
+        .eq("id", input.id)
+        .eq("status", "pending")
+        // Not if the cron claimed a send since the read.
+        .eq("scheduled_at", row.scheduled_at)
+        .select("id");
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      if (!updated || updated.length === 0) {
+        throw new TRPCError({ code: "CONFLICT", message: "This schedule just sent. Refresh and try again." });
+      }
+      return { success: true };
+    }),
+
+  // Removes a failed schedule from the panel. Pending ones use cancelScheduled.
+  deleteScheduled: publicProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const supabase = createAdminClient();
+      const { error } = await supabase
+        .from("scheduled_messages")
+        .delete()
+        .eq("id", input.id)
+        .eq("status", "failed");
+      if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+      return { success: true };
     }),
 
   // cancelScheduled: no account_id filter needed — UUID is globally unique.

@@ -1,21 +1,29 @@
 /**
- * ScheduledList - List of pending scheduled WhatsApp broadcast messages.
- * Fetches upcoming scheduled messages for a given account via tRPC and renders each
- * entry with its send time (Sydney timezone), target groups, message preview, and a cancel action.
+ * ScheduledList - the schedules still to come for one account.
+ *
+ * Shows only active rows: pending ones (switched on or off, including a repeating
+ * series part-way through) and failed ones, which stay with their error until
+ * deleted. Finished schedules leave this panel; their broadcasts appear in
+ * Broadcast History with a "Scheduled" badge.
+ *
+ * Each row has an on/off switch (whatsapp.setScheduledEnabled; an off row is
+ * skipped by the cron and shown as Paused), and pressing it opens ScheduleModal in
+ * edit mode. Switching on a one-off whose time has passed opens the editor to pick
+ * a new time instead.
  */
 'use client';
 
+import { useEffect, useState } from 'react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { ScheduledMessage } from '@/server/api/routers/whatsapp';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
-import { formatRepeatDay, formatRepeatTime } from '@/lib/schedule-repeat';
-
-const SYDNEY_TZ = 'Australia/Sydney';
+import { SCHEDULE_TZ, formatRepeatDay, formatRepeatTime } from '@/lib/schedule-repeat';
+import { ScheduleModal } from './ScheduleModal';
 
 function formatSydneyTime(isoString: string): string {
-  return formatInTimeZone(new Date(isoString), SYDNEY_TZ, "EEE d MMM · h:mm a zzz");
+  return formatInTimeZone(new Date(isoString), SCHEDULE_TZ, "EEE d MMM · h:mm a zzz");
 }
 
 function isRepeating(s: ScheduledMessage): boolean {
@@ -30,19 +38,46 @@ function remainingSends(s: ScheduledMessage): number {
 /** "Repeats weekly · 1 of 4 sent · next Mon 10 Nov 9:00 am" */
 function repeatLine(s: ScheduledMessage): string {
   const parts = [`Repeats ${s.repeat_interval}`, `${s.repeat_sent ?? 0} of ${s.repeat_total} sent`];
-  if (s.status === 'pending') {
+  if (s.status === 'pending' && s.enabled !== false) {
     const next = new Date(s.scheduled_at);
     parts.push(`next ${formatRepeatDay(next)} ${formatRepeatTime(next)}`);
   }
   return parts.join(' · ');
 }
 
-const STATUS_STYLES: Record<ScheduledMessage['status'], { dot: string; label: string; badge: string }> = {
-  pending: { dot: 'bg-blue-400', label: 'Scheduled', badge: 'bg-blue-50 text-blue-600 border-blue-200' },
-  sent:    { dot: 'bg-[#25D366]', label: 'Sent',      badge: 'bg-[#25D366]/8 text-[#1a9e4e] border-[#25D366]/20' },
-  failed:  { dot: 'bg-red-400', label: 'Failed',    badge: 'bg-red-50 text-red-600 border-red-200' },
-  cancelled: { dot: 'bg-gray-300', label: 'Cancelled', badge: 'bg-gray-50 text-gray-500 border-gray-200' },
-};
+/** iOS/Android-style switch: green on, grey off. The button itself is 44px tall. */
+function Toggle({
+  on,
+  disabled,
+  onChange,
+  label,
+}: {
+  on: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      title={on ? 'On - press to pause' : 'Paused - press to switch on'}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className="min-w-[52px] min-h-[44px] flex items-center justify-center disabled:opacity-50"
+    >
+      <span
+        className={`relative inline-block w-11 h-6 rounded-full transition-colors ${on ? 'bg-[#25D366]' : 'bg-gray-300'}`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-5' : 'translate-x-0'}`}
+        />
+      </span>
+    </button>
+  );
+}
 
 interface ScheduledListProps {
   accountId: WhatsAppAccountId;
@@ -54,6 +89,7 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
     { accountId },
     { refetchInterval: 30_000 },
   );
+  const [editing, setEditing] = useState<{ schedule: ScheduledMessage; enableOnSave: boolean } | null>(null);
 
   const cancelMutation = api.whatsapp.cancelScheduled.useMutation({
     onSuccess: () => {
@@ -63,12 +99,22 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
     onError: () => toast.error('Failed to cancel'),
   });
 
+  const deleteMutation = api.whatsapp.deleteScheduled.useMutation({
+    onSuccess: () => {
+      void refetch();
+      toast.success('Deleted');
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const enableMutation = api.whatsapp.setScheduledEnabled.useMutation({
+    onError: (err) => toast.error(err.message),
+  });
+
   // Refetch whenever a new schedule is created (bump from parent)
-  const prevRef = { current: onScheduleCreated };
-  if (prevRef.current !== onScheduleCreated) {
-    void refetch();
-    prevRef.current = onScheduleCreated;
-  }
+  useEffect(() => {
+    if (onScheduleCreated !== undefined && onScheduleCreated > 0) void refetch();
+  }, [onScheduleCreated, refetch]);
 
   const handleCancel = (schedule: ScheduledMessage) => {
     const remaining = remainingSends(schedule);
@@ -79,27 +125,53 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
     cancelMutation.mutate({ id: schedule.id });
   };
 
-  const pendingCount = schedules.filter((s) => s.status === 'pending').length;
+  const handleToggle = async (schedule: ScheduledMessage, enabled: boolean) => {
+    try {
+      const res = await enableMutation.mutateAsync({ id: schedule.id, enabled });
+      if (res.needsNewTime) {
+        toast('Pick a new time, this one has passed');
+        setEditing({ schedule, enableOnSave: true });
+        return;
+      }
+      if (enabled && res.scheduledAt && res.scheduledAt !== schedule.scheduled_at) {
+        const next = new Date(res.scheduledAt);
+        toast.success(`Back on, next send ${formatRepeatDay(next)} ${formatRepeatTime(next)}`);
+      } else {
+        toast.success(enabled ? 'Schedule switched on' : 'Schedule paused');
+      }
+      void refetch();
+    } catch {
+      /* toast shown by onError */
+    }
+  };
+
+  const activeCount = schedules.filter((s) => s.status === 'pending' && s.enabled !== false).length;
+  const pausedCount = schedules.filter((s) => s.status === 'pending' && s.enabled === false).length;
 
   return (
     <div className="rounded-xl border border-[var(--color-border-subtle)] bg-white shadow-sm overflow-hidden">
       {/* Header */}
       <div className="px-5 py-4 border-b border-[var(--color-border-subtle)] flex items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-sm font-semibold text-[var(--color-text-primary)]">Scheduled Messages</h2>
-            {pendingCount > 0 && (
+            {activeCount > 0 && (
               <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
-                {pendingCount} pending
+                {activeCount} upcoming
+              </span>
+            )}
+            {pausedCount > 0 && (
+              <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200">
+                {pausedCount} paused
               </span>
             )}
           </div>
-          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Messages queued to send at a specific time</p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Press a schedule to edit it. Finished ones move to Broadcast History.</p>
         </div>
         <button
           onClick={() => void refetch()}
           disabled={isLoading}
-          className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition disabled:opacity-40"
+          className="w-11 h-11 rounded-lg flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition disabled:opacity-40"
           title="Refresh"
         >
           <svg
@@ -131,12 +203,13 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
             </svg>
           </div>
           <p className="text-sm text-[var(--color-text-muted)]">No scheduled messages</p>
-          <p className="text-xs text-[var(--color-text-faint)]">Use &quot;Schedule Send&quot; to queue a message for later</p>
+          <p className="text-xs text-[var(--color-text-faint)]">Use &quot;Schedule&quot; next to Send to queue a message for later</p>
         </div>
       ) : (
         <div className="divide-y divide-[var(--color-border-subtle)]">
           {schedules.map((schedule) => {
-            const style = STATUS_STYLES[schedule.status];
+            const failed = schedule.status === 'failed';
+            const paused = !failed && schedule.enabled === false;
             const preview = schedule.message.length > 70
               ? schedule.message.slice(0, 70) + '…'
               : schedule.message;
@@ -144,51 +217,90 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
               ? schedule.group_names.join(', ')
               : `${schedule.group_names.slice(0, 2).join(', ')} +${schedule.group_names.length - 2} more`;
 
-            return (
-              <div key={schedule.id} className="px-5 py-3.5 flex items-start gap-3 hover:bg-[var(--color-bg-secondary)] transition-colors">
-                {/* Status dot */}
-                <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
-
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[var(--color-text-primary)] leading-snug">{preview}</p>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
-                    <span className="text-xs text-[var(--color-text-muted)] truncate max-w-[200px]">{groupLabel}</span>
-                    <span className="text-xs text-[var(--color-text-faint)]">·</span>
-                    <span className="text-xs text-[var(--color-text-muted)]">
-                      {formatSydneyTime(schedule.scheduled_at)}
-                    </span>
-                  </div>
-                  {isRepeating(schedule) && (
-                    <p className="text-xs text-[var(--color-text-muted)] mt-1">{repeatLine(schedule)}</p>
+            const body = (
+              <>
+                <p className={`text-sm leading-snug ${paused ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-primary)]'}`}>
+                  {preview}
+                </p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+                  <span className="text-xs text-[var(--color-text-muted)] truncate max-w-[200px]">{groupLabel}</span>
+                  <span className="text-xs text-[var(--color-text-faint)]">·</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">{formatSydneyTime(schedule.scheduled_at)}</span>
+                  {paused && (
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Paused</span>
+                  )}
+                  {failed && (
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full border bg-red-50 text-red-600 border-red-200">Failed</span>
                   )}
                 </div>
+                {isRepeating(schedule) && (
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">{repeatLine(schedule)}</p>
+                )}
+                {failed && schedule.error && (
+                  <p className="text-xs text-red-500 mt-1 break-words">{schedule.error}</p>
+                )}
+              </>
+            );
 
-                {/* Right: badge + cancel */}
-                <div className="shrink-0 flex items-center gap-2">
-                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${style.badge}`}>
-                    {style.label}
-                  </span>
-                  {schedule.status === 'pending' && (
-                    <button
-                      onClick={() => handleCancel(schedule)}
-                      disabled={cancelMutation.isPending}
-                      title="Cancel scheduled message"
-                      className="w-6 h-6 rounded-md flex items-center justify-center text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-50 transition disabled:opacity-40"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6l-1 14H6L5 6" />
-                        <path d="M10 11v6" /><path d="M14 11v6" />
-                        <path d="M9 6V4h6v2" />
-                      </svg>
-                    </button>
+            return (
+              <div
+                key={schedule.id}
+                className={`pl-5 pr-2 py-2 flex items-center gap-2 transition-colors ${paused ? 'bg-[var(--color-bg-secondary)]/60' : 'hover:bg-[var(--color-bg-secondary)]'}`}
+              >
+                {failed ? (
+                  <div className="flex-1 min-w-0 py-1.5">{body}</div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditing({ schedule, enableOnSave: false })}
+                    title="Edit this schedule"
+                    className={`flex-1 min-w-0 min-h-[44px] py-1.5 text-left rounded-md ${paused ? 'opacity-70' : ''}`}
+                  >
+                    {body}
+                  </button>
+                )}
+
+                {/* Right: switch + delete */}
+                <div className="shrink-0 flex items-center">
+                  {!failed && (
+                    <Toggle
+                      on={!paused}
+                      disabled={enableMutation.isPending}
+                      onChange={(next) => void handleToggle(schedule, next)}
+                      label={paused ? 'Switch this schedule on' : 'Pause this schedule'}
+                    />
                   )}
+                  <button
+                    onClick={() => (failed ? deleteMutation.mutate({ id: schedule.id }) : handleCancel(schedule))}
+                    disabled={cancelMutation.isPending || deleteMutation.isPending}
+                    title={failed ? 'Delete this failed schedule' : 'Cancel scheduled message'}
+                    aria-label={failed ? 'Delete' : 'Cancel schedule'}
+                    className="w-11 h-11 rounded-md flex items-center justify-center text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-50 transition disabled:opacity-40"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6" /><path d="M14 11v6" />
+                      <path d="M9 6V4h6v2" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {editing && (
+        <ScheduleModal
+          mode="edit"
+          isOpen
+          accountId={accountId}
+          schedule={editing.schedule}
+          enableOnSave={editing.enableOnSave}
+          onClose={() => setEditing(null)}
+          onSaved={() => void refetch()}
+        />
       )}
     </div>
   );
