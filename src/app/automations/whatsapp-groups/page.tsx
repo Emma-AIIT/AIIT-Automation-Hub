@@ -33,6 +33,7 @@ import toast from 'react-hot-toast';
 import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelector';
 import { ScheduleModal } from '@/components/modules/whatsapp-groups/ScheduleModal';
 import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledList';
+import { describePending, type PendingSchedule } from '@/lib/schedule-repeat';
 import { SignalNotConnectedModal } from '@/components/modules/whatsapp-groups/SignalNotConnectedModal';
 import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
 import { NumbersInput } from '@/components/modules/broadcast/NumbersInput';
@@ -94,6 +95,11 @@ export default function WhatsAppBroadcastPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSending, setIsSending] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  // Chosen in ScheduleModal ("Set schedule") but not saved: while set, the send
+  // button turns blue and reads "Schedule", and pressing it creates the row instead
+  // of sending now. Saving from the button rather than the modal is what stops a
+  // schedule and an accidental "Send now" of the same draft both going out.
+  const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null);
   const [signalPopupOpen, setSignalPopupOpen] = useState(false);
   const [scheduleCreatedBump, setScheduleCreatedBump] = useState(0);
   const [broadcastHistoryBump, setBroadcastHistoryBump] = useState(0);
@@ -106,6 +112,7 @@ export default function WhatsAppBroadcastPage() {
     setMessage('');
     setAttachments([]);
     setSelectedIds(new Set());
+    setPendingSchedule(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
 
@@ -117,6 +124,7 @@ export default function WhatsAppBroadcastPage() {
     const first = accountsForPlatform(id)[0];
     if (first) setActiveAccount(first.id);
     setSelectedIds(new Set());
+    setPendingSchedule(null);
     // Check the clicked platform, not `connected`, which still describes the tab being
     // left. Same rule as `connected`: a non-WhatsApp platform is not connected until
     // getPlatforms says it is.
@@ -338,6 +346,45 @@ export default function WhatsAppBroadcastPage() {
     }
   }, [message, attachments, selectedIds, isSending, activeAccount, groups, connected, isNumbers, numbers, recipientCount, recipientWord]);
 
+  // The blue "Schedule" button: saves the pending schedule as a scheduled_messages
+  // row (nothing is sent now), then clears the composer exactly like handleSend.
+  const scheduleMutation = api.whatsapp.scheduleMessage.useMutation();
+  const handleSchedule = useCallback(async () => {
+    if (!pendingSchedule || isSending || isNumbers) return;
+    const text = message.trim();
+    if (!connected || !text || selectedIds.size === 0 || attachments.length > 0) return;
+    if (new Date(pendingSchedule.scheduledAt).getTime() <= Date.now()) {
+      toast.error('That time has passed. Press the schedule chip to pick a new one.');
+      return;
+    }
+
+    setIsSending(true);
+    const ids = Array.from(selectedIds);
+    try {
+      await scheduleMutation.mutateAsync({
+        accountId: activeAccount,
+        groupIds: ids,
+        groupNames: ids.map((id) => groups.find((g) => g.id === id)?.name ?? id),
+        message: text,
+        scheduledAt: pendingSchedule.scheduledAt,
+        repeatInterval: pendingSchedule.repeatInterval,
+        repeatTotal: pendingSchedule.repeatTotal,
+      });
+      setMessage('');
+      setAttachments([]);
+      setSelectedIds(new Set());
+      setNumbersText('');
+      setPendingSchedule(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setScheduleCreatedBump((n) => n + 1);
+      toast.success(`Scheduled for ${describePending(pendingSchedule)}. Nothing has been sent yet.`, { duration: 7000 });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to schedule message. Please try again.');
+    } finally {
+      setIsSending(false);
+    }
+  }, [pendingSchedule, isSending, isNumbers, message, connected, selectedIds, attachments, activeAccount, groups, scheduleMutation]);
+
   const charCount = message.length;
   const charCountColor =
     charCount > 950 ? 'text-red-500' : charCount > 800 ? 'text-amber-500' : 'text-[var(--color-text-faint)]';
@@ -349,6 +396,12 @@ export default function WhatsAppBroadcastPage() {
     !(isNumbers && numbers.length > MAX_NUMBERS) &&
     !isSending &&
     !isLoadingReuseImage;
+
+  // Schedules carry text only (no attachments), on group accounts only.
+  const scheduleMode = pendingSchedule !== null && !isNumbers;
+  const scheduleBlockedByImages = scheduleMode && attachments.length > 0;
+  const canSchedule = canSend && message.trim().length > 0 && attachments.length === 0;
+  const mainEnabled = scheduleMode ? canSchedule : canSend;
 
   return (
     <div className="p-6 md:p-8 space-y-6" style={{ '--pc': platform.color } as React.CSSProperties}>
@@ -539,16 +592,52 @@ export default function WhatsAppBroadcastPage() {
               </>
             )}
 
+            {/* Pending schedule chip: press to change it, ✕ to go back to Send now */}
+            {scheduleMode && pendingSchedule && (
+              <div className="flex items-center gap-1 rounded-lg border border-[#3b82f6]/30 bg-[#3b82f6]/5">
+                <button
+                  type="button"
+                  onClick={() => setScheduleModalOpen(true)}
+                  title="Change the schedule"
+                  className="flex-1 min-w-0 min-h-[44px] flex items-center gap-2 pl-3 text-left text-xs font-medium text-[#2563eb]"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                  <span className="truncate">Scheduled for {describePending(pendingSchedule)}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingSchedule(null)}
+                  title="Cancel the schedule and send now instead"
+                  aria-label="Cancel the schedule"
+                  className="w-11 h-11 shrink-0 rounded-lg flex items-center justify-center text-[#2563eb] hover:bg-[#3b82f6]/10 transition"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            {scheduleBlockedByImages && (
+              <p className="text-xs text-amber-600">Schedules can&apos;t include images. Remove them, or press ✕ to send now instead.</p>
+            )}
+
             {/* Send buttons row */}
             <div className="flex gap-2">
               <button
-                onClick={handleSend}
-                disabled={!canSend}
+                onClick={scheduleMode ? () => void handleSchedule() : handleSend}
+                disabled={!mainEnabled}
                 className={`
-                  flex-1 flex items-center justify-center gap-2.5 py-3 rounded-lg text-sm font-semibold transition-all
-                  ${canSend
-                    ? 'bg-(--pc) hover:brightness-95 text-white shadow-sm hover:shadow-md active:scale-[0.98]'
-                    : 'bg-(--color-bg-hover) text-(--color-text-faint) cursor-not-allowed border border-(--color-border-subtle)'
+                  flex-1 min-h-[44px] flex items-center justify-center gap-2.5 py-3 px-3 rounded-lg text-sm font-semibold transition-all
+                  ${!mainEnabled
+                    ? 'bg-(--color-bg-hover) text-(--color-text-faint) cursor-not-allowed border border-(--color-border-subtle)'
+                    : scheduleMode
+                      ? 'bg-[#3b82f6] hover:bg-[#2563eb] text-white shadow-sm hover:shadow-md active:scale-[0.98]'
+                      : 'bg-(--pc) hover:brightness-95 text-white shadow-sm hover:shadow-md active:scale-[0.98]'
                   }
                 `}
               >
@@ -557,7 +646,17 @@ export default function WhatsAppBroadcastPage() {
                     <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                     </svg>
-                    Queuing...
+                    {scheduleMode ? 'Scheduling...' : 'Queuing...'}
+                  </>
+                ) : scheduleMode && pendingSchedule ? (
+                  <>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                      <line x1="16" y1="2" x2="16" y2="6" />
+                      <line x1="8" y1="2" x2="8" y2="6" />
+                      <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                    <span className="truncate">Schedule · {describePending(pendingSchedule)}</span>
                   </>
                 ) : (
                   <>
@@ -571,14 +670,14 @@ export default function WhatsAppBroadcastPage() {
                 )}
               </button>
 
-              {/* Schedule Send button */}
-              {!isNumbers && <button
+              {/* Schedule: opens the modal to set a time; the chip above replaces it once set */}
+              {!isNumbers && !scheduleMode && <button
                 onClick={() => setScheduleModalOpen(true)}
-                disabled={!canSend}
+                disabled={!connected}
                 title="Schedule message for later"
                 className={`
-                  flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-lg text-sm font-semibold transition-all border
-                  ${canSend
+                  min-h-[44px] flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-lg text-sm font-semibold transition-all border
+                  ${connected
                     ? 'border-(--color-border-default) text-(--color-text-secondary) hover:bg-(--color-bg-hover) hover:border-(--color-border-strong) active:scale-[0.98]'
                     : 'border-(--color-border-subtle) text-(--color-text-faint) cursor-not-allowed'
                   }
@@ -682,14 +781,16 @@ export default function WhatsAppBroadcastPage() {
       )}
 
       {/* Schedule modal */}
-      {connected && <ScheduleModal
-        accountId={activeAccount}
+      {/* "set" mode saves nothing: it sets pendingSchedule, and the blue Schedule
+          button (handleSchedule) creates the row. */}
+      {connected && !isNumbers && <ScheduleModal
+        mode="set"
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
         message={message}
-        groupIds={Array.from(selectedIds)}
-        groupNames={Array.from(selectedIds).map((id) => groups.find((g) => g.id === id)?.name ?? id)}
-        onSuccess={() => setScheduleCreatedBump((n) => n + 1)}
+        groupCount={selectedIds.size}
+        initial={pendingSchedule}
+        onSet={setPendingSchedule}
       />}
 
       <SignalNotConnectedModal isOpen={signalPopupOpen} onClose={handleSignalPopupClose} />

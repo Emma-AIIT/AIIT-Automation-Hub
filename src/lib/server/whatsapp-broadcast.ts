@@ -581,6 +581,9 @@ export async function enqueueBroadcast(
     fileNames?: string[] | null;
     imagePaths?: string[] | null;
     queuedAt?: Date;
+    /** Set when the cron releases a scheduled_messages row, so Broadcast History
+     *  can badge the broadcast "Scheduled" and fold a repeating series together. */
+    scheduledMessageId?: string | null;
   },
 ): Promise<{ broadcastId: string; finishesAt: Date }> {
   const { accountId, message, groupIds, groupNames, fileNames, imagePaths } = opts;
@@ -604,6 +607,9 @@ export async function enqueueBroadcast(
       // Ordered on in the history list; overwritten with the real finish time when
       // the last group goes out.
       sent_at: queuedAt.toISOString(),
+      // Only written for scheduled sends, so dashboard sends don't depend on the
+      // 20261102010000 migration.
+      ...(opts.scheduledMessageId ? { scheduled_message_id: opts.scheduledMessageId } : {}),
     })
     .select("id")
     .single();
