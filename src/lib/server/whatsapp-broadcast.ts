@@ -156,9 +156,9 @@ export function isTimeout(reason: unknown): boolean {
 
 export function describeSendError(reason: unknown): string {
   if (reason instanceof Error) {
-    // Telegram direct-mode and WaSender timeouts already carry their own
+    // Telegram direct-mode and Exchange HQ timeouts already carry their own
     // explanation; the text below is about the Make.com scenario.
-    if (isTimeout(reason) && !/^(Telegram|WaSender)/.test(reason.message)) {
+    if (isTimeout(reason) && !/^(Telegram|Exchange HQ)/.test(reason.message)) {
       return (
         `Make.com did not respond within ${SEND_TIMEOUT_MS / 1000}s, so it is unknown ` +
         `whether this group received the message. It was NOT re-sent, to avoid ` +

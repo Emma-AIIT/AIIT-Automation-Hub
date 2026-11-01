@@ -5,8 +5,9 @@
  * go through the messaging bridge; whatsapp.getPlatforms says whether each platform is
  * set up, and one that isn't renders the page with no groups or history and makes no
  * server calls for it. Clicking the Signal tab while it isn't connected also opens a
- * "not connected yet" popup. The New numbers tab sends to typed or imported phone
- * numbers through WaSender, using the same queue with each number as a recipient.
+ * "not connected yet" popup. The Exchange HQ account under WhatsApp sends to typed or
+ * imported phone numbers through WaSender instead of groups, using the same queue with
+ * each number as a recipient, and is set up separately from the other WhatsApp accounts.
  *
  * WhatsApp tab: compose and send text messages or images to one or more
  * WhatsApp groups across multiple accounts (aiit-automation, susu-closets, etc.).
@@ -39,7 +40,7 @@ import { PlatformIcon } from '@/components/modules/broadcast/PlatformIcon';
 import { parsePhoneNumbers } from '@/lib/phone-numbers';
 import { BROADCAST_PLATFORMS } from '@/lib/config/broadcast-platforms';
 import type { BroadcastPlatformId } from '@/lib/config/broadcast-platforms';
-import { accountsForPlatform } from '@/lib/config/whatsapp-accounts';
+import { accountsForPlatform, isWasender } from '@/lib/config/whatsapp-accounts';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
 import type { BroadcastLogEntry, WhatsAppGroup } from '@/server/api/routers/whatsapp';
 
@@ -73,12 +74,21 @@ export default function WhatsAppBroadcastPage() {
   // treated as connected (as it always was) and the others as not set up.
   const { data: platformStatus } = api.whatsapp.getPlatforms.useQuery(undefined, { staleTime: Infinity });
   const platformInfo = platformStatus?.find((p) => p.id === activePlatform);
-  const connected = platformInfo?.connected ?? activePlatform === 'whatsapp';
+  const platformConnected = platformInfo?.connected ?? activePlatform === 'whatsapp';
   const accounts = platformInfo?.accounts ?? accountsForPlatform(activePlatform);
-  const isNumbers = activePlatform === 'numbers';
+  const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
+  // Exchange HQ has its own setup and sends to numbers rather than groups. `connected`
+  // describes the active account; the account row uses platformConnected, so the other
+  // WhatsApp accounts stay clickable when Exchange HQ isn't set up.
+  const isNumbers = isWasender(activeAccount);
+  const connected = isNumbers
+    ? (platformInfo?.accounts.find((a) => a.id === activeAccount)?.connected ?? false)
+    : platformConnected;
+  const notSetUpName = isNumbers
+    ? (accounts.find((a) => a.id === activeAccount)?.name ?? platform.name)
+    : platform.name;
   const [numbersText, setNumbersText] = useState('');
   const numbers = useMemo(() => parsePhoneNumbers(numbersText).numbers, [numbersText]);
-  const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -165,12 +175,12 @@ export default function WhatsAppBroadcastPage() {
 
   const handleRefresh = useCallback(() => {
     if (!connected) {
-      toast(`${platform.name} isn't set up yet, so there are no groups to pull.`);
+      toast(`${notSetUpName} isn't set up yet, so there are no groups to pull.`);
       return;
     }
     setSelectedIds(new Set());
     syncMutation.mutate({ accountId: activeAccount });
-  }, [syncMutation, activeAccount, platform, connected]);
+  }, [syncMutation, activeAccount, notSetUpName, connected]);
 
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(e.target.files ?? []);
@@ -224,7 +234,7 @@ export default function WhatsAppBroadcastPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     if (!entry.has_file) {
-      toast.success('Message loaded — choose groups and send.');
+      toast.success(`Message loaded — choose ${recipientWord}s and send.`);
       return;
     }
 
@@ -253,8 +263,8 @@ export default function WhatsAppBroadcastPage() {
       setAttachments(loaded);
       toast.success(
         remoteFiles.length === 1
-          ? 'Message and image loaded — choose groups and send.'
-          : `Message and ${remoteFiles.length} attachments loaded — choose groups and send.`,
+          ? `Message and image loaded — choose ${recipientWord}s and send.`
+          : `Message and ${remoteFiles.length} attachments loaded — choose ${recipientWord}s and send.`,
       );
     } catch (err) {
       toast.error(
@@ -265,7 +275,7 @@ export default function WhatsAppBroadcastPage() {
     } finally {
       setIsLoadingReuseImage(false);
     }
-  }, [activeAccount, utils]);
+  }, [activeAccount, utils, recipientWord]);
 
   // Queues the whole broadcast in ONE request — the server fans out to Make.com in the
   // background and the history panel below shows live progress. The composer clears as
@@ -396,13 +406,13 @@ export default function WhatsAppBroadcastPage() {
 
       {/* Account Tabs */}
       <div className="flex gap-1 p-1 rounded-lg bg-(--color-bg-secondary) border border-(--color-border-subtle) w-fit">
-        {!connected && accounts.map((account) => (
+        {!platformConnected && accounts.map((account) => (
           <span key={account.id} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-white shadow-sm text-(--color-text-primary) border border-(--color-border-subtle)">
             <span className="w-2 h-2 rounded-full shrink-0 bg-(--pc)" />
             {account.name}
           </span>
         ))}
-        {connected && accounts.map((account) => (
+        {platformConnected && accounts.map((account) => (
           <button
             key={account.id}
             onClick={() => handleAccountSwitch(account.id)}
@@ -622,8 +632,10 @@ export default function WhatsAppBroadcastPage() {
                   <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3 bg-(--pc)/10 text-(--pc)">
                     <PlatformIcon platform={platform.id} />
                   </div>
-                  <p className="text-sm font-medium text-(--color-text-primary)">{platform.name} isn&apos;t set up yet</p>
-                  <p className="text-xs text-(--color-text-muted) mt-1">Your {platform.name} groups will show here once it is connected</p>
+                  <p className="text-sm font-medium text-(--color-text-primary)">{notSetUpName} isn&apos;t set up yet</p>
+                  <p className="text-xs text-(--color-text-muted) mt-1">
+                    {isNumbers ? 'You can add phone numbers here once it is connected' : `Your ${platform.name} groups will show here once it is connected`}
+                  </p>
                 </div>
               )}
             />}
@@ -646,7 +658,7 @@ export default function WhatsAppBroadcastPage() {
       ) : (
         <>
           {/* Same empty states ScheduledList and BroadcastHistory show, without querying */}
-          <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
+          {!isNumbers && <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-(--color-border-subtle)">
               <h2 className="text-sm font-semibold text-(--color-text-primary)">Scheduled Messages</h2>
               <p className="text-xs text-(--color-text-muted) mt-0.5">Messages queued to send at a specific time</p>
@@ -655,7 +667,7 @@ export default function WhatsAppBroadcastPage() {
               <p className="text-sm text-(--color-text-muted)">No scheduled messages</p>
               <p className="text-xs text-(--color-text-faint)">Use &quot;Schedule Send&quot; to queue a message for later</p>
             </div>
-          </div>
+          </div>}
           <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-(--color-border-subtle)">
               <h2 className="text-sm font-semibold text-(--color-text-primary)">Broadcast History</h2>

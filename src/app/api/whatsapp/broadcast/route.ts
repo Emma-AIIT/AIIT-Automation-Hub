@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
         );
       }
       if (!isSendConfigured(accountId)) {
-        return NextResponse.json({ error: "WASENDER_API_KEY is not set" }, { status: 400 });
+        return NextResponse.json({ error: "Exchange HQ isn't set up yet" }, { status: 400 });
       }
     }
 
