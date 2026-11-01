@@ -47,6 +47,25 @@
 
 ## 📝 Changelog Entries
 
+### 2026-11-02 - Exchange HQ syncs its WhatsApp groups and contacts
+
+**Changed**:
+- Exchange HQ now works like the other WhatsApp accounts: "Refresh groups" pulls the number's groups and contacts from WaSender into the normal list, with search, select-all and a Group/Person label. The number entry box is gone.
+- Sends go to the selected chats with the same pacing, history, pause and cancel. "Reply STOP to opt out." goes on messages to people only, not groups. The 200 limit stays and now applies to chats.
+- Scheduling is on for Exchange HQ, as selected chats fit the shared scheduler.
+- `getGroups` and the stale-row check read `whatsapp_groups` page by page, as Supabase returns at most 1000 rows per request.
+
+**Removed**: `NumbersInput.tsx`, `src/lib/phone-numbers.ts`, its tests, the CSV/.xlsx import and the `read-excel-file` dependency.
+
+**Technical Details**:
+- New `src/lib/wasender-chats.ts` holds the pure logic (`listChats`, `contactToChat`, `buildSendRequests`), tested in `tests/wasender-chats.test.mjs` against a local mock of the documented responses. `src/lib/server/wasender.ts` adds `listWasenderChats()`.
+- Uses `GET /api/status`, then `GET /api/groups` and `GET /api/contacts` with `paginated=true`. WaSender has no endpoint listing chats, so individuals are the contacts synced to the session; someone who has messaged the number but was never synced won't appear.
+- No migration: group or person is derived from the id (`@g.us` is a group). Syncing with an empty result, or with any list failing, leaves the existing list alone.
+
+**Testing**: Typecheck, lint, build and `npm test`. No real WaSender call was made, because the key isn't available, so real sync and sending are unproven until `WASENDER_API_KEY` is set.
+
+---
+
 ### 2026-11-02 - Broadcast: New numbers becomes the Exchange HQ WhatsApp account
 
 **Changed**:

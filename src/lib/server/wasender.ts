@@ -1,27 +1,33 @@
 /**
- * WaSender client: sends one WhatsApp message to a phone number.
- * Used by drainBroadcastQueue for the Exchange HQ account, so these sends get the
- * same pacing, pause/cancel and history as group broadcasts. SERVER-SIDE ONLY.
+ * WaSender client for the Exchange HQ account: lists the number's groups and contacts
+ * for whatsapp.syncGroups, and sends one recipient's message for drainBroadcastQueue,
+ * so these sends get the same pacing, pause/cancel and history as other broadcasts.
+ * The API rules and all pure logic are in ~/lib/wasender-chats. SERVER-SIDE ONLY.
  *
- * API: POST /api/send-message with a Bearer key and JSON { to, text?, imageUrl? }.
- * The image must be a public URL, so the caller passes short-lived signed URLs.
+ * Images must be public URLs, so the caller passes short-lived signed URLs.
  */
 import { env } from '~/env';
+import {
+  WASENDER_API_BASE,
+  buildSendRequests,
+  createWasenderGet,
+  listChats,
+  wasenderErrorMessage,
+} from '~/lib/wasender-chats';
+import type { WasenderChat } from '~/lib/wasender-chats';
 
-const SEND_URL = 'https://www.wasenderapi.com/api/send-message';
 const SEND_TIMEOUT_MS = 60_000;
 
-/** Added to every message so recipients who never opted in have a way out. */
-export const OPT_OUT_LINE = 'Reply STOP to opt out.';
-
-export function withOptOut(message: string | null): string {
-  return message ? `${message}\n\n${OPT_OUT_LINE}` : OPT_OUT_LINE;
+/** Every group and contact on the connected number. Throws a readable Error. */
+export async function listWasenderChats(): Promise<WasenderChat[]> {
+  if (!env.WASENDER_API_KEY) throw new Error("Exchange HQ isn't set up yet.");
+  return listChats(createWasenderGet(env.WASENDER_API_KEY));
 }
 
 async function post(body: Record<string, string>): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(SEND_URL, {
+    res = await fetch(`${WASENDER_API_BASE}/api/send-message`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${env.WASENDER_API_KEY}`,
@@ -34,7 +40,7 @@ async function post(body: Record<string, string>): Promise<void> {
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       const timeout = new Error(
         `Exchange HQ did not respond within ${SEND_TIMEOUT_MS / 1000}s, so it is unknown whether ` +
-          `this number received the message. It was NOT re-sent, to avoid sending twice.`,
+          `this chat received the message. It was NOT re-sent, to avoid sending twice.`,
       );
       timeout.name = 'TimeoutError';
       throw timeout;
@@ -43,33 +49,20 @@ async function post(body: Record<string, string>): Promise<void> {
   }
 
   if (!res.ok) {
-    const json = (await res.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(`Exchange HQ: ${json?.message ?? `HTTP ${res.status}`}`);
+    throw new Error(wasenderErrorMessage(res.status, await res.json().catch(() => null)));
   }
 }
 
-/**
- * Sends the message to one number. With images, each goes as its own message and the
- * caption rides on the last, matching sendToGroup. Throws on any failure.
- */
+/** Sends the message to one group or person. Throws on any failure. */
 export async function sendWasender(opts: {
   to: string;
   message: string | null;
   imageUrls: string[];
   onAttachmentSent?: () => void | Promise<void>;
 }): Promise<void> {
-  const { to, imageUrls, onAttachmentSent } = opts;
-  const text = withOptOut(opts.message);
-
-  if (imageUrls.length === 0) {
-    await post({ to, text });
-    await onAttachmentSent?.();
-    return;
-  }
-
-  for (let i = 0; i < imageUrls.length; i++) {
-    const isLast = i === imageUrls.length - 1;
-    await post({ to, imageUrl: imageUrls[i]!, ...(isLast ? { text } : {}) });
+  const { to, message, imageUrls, onAttachmentSent } = opts;
+  for (const body of buildSendRequests({ chatId: to, message, imageUrls })) {
+    await post(body);
     await onAttachmentSent?.();
   }
 }

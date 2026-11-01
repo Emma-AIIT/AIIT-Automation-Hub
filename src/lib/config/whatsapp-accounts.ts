@@ -11,9 +11,9 @@
  *   - aiit-business:   AIIT Business Account
  *
  * One WhatsApp account works differently and has neither of those:
- *   - wasender-numbers: Exchange HQ, sends to typed or imported phone numbers through
- *     WaSender (isWasender). It has no groups or Make.com scenarios, so it appears on
- *     Broadcast only. Pages built on groups use groupAccountsForPlatform to leave it out.
+ *   - wasender-numbers: Exchange HQ, syncs its groups and contacts from WaSender and
+ *     sends through it (isWasender). It has no Make.com scenarios, so it appears on
+ *     Broadcast only. Participants and Chats use groupAccountsForPlatform to leave it out.
  *
  * Telegram and Signal accounts are served by the messaging bridge
  * (services/messaging-bridge, see its SETUP.md), which the Hub calls directly:
@@ -86,8 +86,8 @@ export function accountsForPlatform(platform: BroadcastPlatformId): WhatsAppAcco
 }
 
 /**
- * Accounts on one platform that have groups and participants, for every page except
- * Broadcast. Leaves out Exchange HQ, which only sends to phone numbers.
+ * Accounts on one platform that have participant data, for every page except
+ * Broadcast. Leaves out Exchange HQ, which has no Make.com participant or chat scenarios.
  */
 export function groupAccountsForPlatform(platform: BroadcastPlatformId): WhatsAppAccount[] {
   return accountsForPlatform(platform).filter((a) => !isWasender(a.id));
@@ -182,7 +182,7 @@ export function isTelegramDirect(accountId: string): boolean {
   return accountId === 'telegram-ali' && getTelegramMode() === 'direct';
 }
 
-/** True when this account sends to phone numbers through WaSender rather than a URL. Client-safe. */
+/** True when this account syncs and sends through WaSender rather than a URL. Client-safe. */
 export function isWasender(accountId: string): boolean {
   return accountId === 'wasender-numbers';
 }
