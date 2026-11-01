@@ -47,6 +47,22 @@
 
 ## 📝 Changelog Entries
 
+### 2026-11-02 - Broadcast: Signal tab stays visible, with a "not connected" popup
+
+**Added**:
+- `src/components/modules/whatsapp-groups/SignalNotConnectedModal.tsx`: popup titled "Signal not connected yet" with an OK button (44px tall). Escape and a click on the backdrop also close it.
+
+**Changed**:
+- `handlePlatformSwitch` in the Broadcast page opens the popup each time the Signal tab is clicked from another tab while Signal isn't connected. It checks the clicked platform's status from `whatsapp.getPlatforms`, not `connected` (which still describes the tab being left). After closing, the person stays on the Signal tab with its existing not-connected state.
+
+**Technical Details**:
+- Signal stays in `BROADCAST_PLATFORMS` and `WHATSAPP_ACCOUNTS`, and the page subtitle still names it. This replaces the earlier plan to hide Signal, which was reversed before it reached `main`.
+- If the `SIGNAL_BRIDGE_*` env vars are set and Signal reports connected, no popup shows. No Signal code, env vars or bridge support were removed. WhatsApp and Telegram are unchanged.
+
+**Testing**: Typecheck, lint, build and `npm test`. No messages sent and no test data written.
+
+---
+
 ### 2026-10-19 - Broadcast: Telegram direct mode (GramJS on Vercel, no bridge server)
 
 **Added**:
