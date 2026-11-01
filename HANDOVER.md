@@ -373,6 +373,8 @@ no serverless function lives that long.
 - Broadcasts cap at 200 groups. At 15 minutes apart that is already ~2 days of
   sending — a 568 group send would take 142 days.
 
+**Scheduled broadcasts (v2)**: "Schedule" on the composer opens `ScheduleModal` in `set` mode, which saves nothing: it only sets a pending time (and optional repeat). The Send button then turns blue and reads "Schedule · <time>", and pressing it creates the `scheduled_messages` row (`whatsapp.scheduleMessage`) and clears the composer. Schedules are text only and hidden on Exchange HQ. `ScheduledList` shows active rows only, each with an on/off switch (`setScheduledEnabled`; the cron skips rows with `enabled = false`) and press-to-edit (`ScheduleModal` in `edit` mode → `updateScheduled`, plus `deleteScheduled`). Editing a series resets `repeat_anchor_at` to the new first send and stores `repeat_base_sent`, so `occurrenceIndex` in `src/lib/schedule-repeat.ts` counts from the edit. Each broadcast the cron queues carries `whatsapp_broadcast_log.scheduled_message_id` (`enqueueBroadcast({ scheduledMessageId })`), so Broadcast History badges it "Scheduled" and folds a repeating series into one entry. Migration: `20261102010000_scheduled_messages_v2.sql` (applied to production 2026-11-02).
+
 **Telegram and Signal (Broadcast tabs)**: the same page, queue, pacing, scheduling and history serve two more accounts, `telegram-ali` (Ali's own Telegram account, via GramJS) and `signal-aiit` (a linked Signal number, via self-hosted signal-cli-rest-api). Both sit behind the messaging bridge in `services/messaging-bridge/` (runs on an Oracle Cloud VM; setup in `services/messaging-bridge/SETUP.md`). The Hub calls it directly, with no Make.com in between:
 - **Refresh groups** → `POST {"trigger":"pull_groups"}` to the platform's sync URL → `{"synced": n, "groups": [{id, name}]}`. Unlike Make.com, the bridge does not write to Supabase: `whatsapp.syncGroups` upserts the groups into `whatsapp_groups` for that account and deletes the account's groups that were not returned.
 - **Sending** → the cron posts exactly what it posts to Make.com (`{chatId, message}` JSON, or multipart `chatId` + `message` + `file` per attachment, caption on the last) to the platform's send URL. A non-2xx with a plain-text body is the error shown in Broadcast History.
@@ -508,7 +510,7 @@ All routers live in [src/server/api/routers/](src/server/api/routers/). Combined
 | `tickets` | `tickets.ts` | `getAll`, `getById`, `create`, `addReply`, `updateStatus`, `getTemplates` |
 | `quotePipeline` | `quotePipeline.ts` | `getAll`, `updateStatus`, `getStats` |
 | `vapi` | `vapi.ts` | `getCallLogs`, `getAgentStats`, `getCallById` |
-| `whatsapp` | `whatsapp.ts` | `getGroups`, `getParticipants`, `sendBroadcast`, `getBroadcastHistory`, `scheduleMessage` |
+| `whatsapp` | `whatsapp.ts` | `getGroups`, `getParticipants`, `sendBroadcast`, `getBroadcastHistory`, `scheduleMessage`, `setScheduledEnabled`, `updateScheduled`, `deleteScheduled` |
 | `invoicing` | `invoicing.ts` | `getMessages`, `getStats` |
 | `search` | `search.ts` | `global` (searches clients + tickets + quotes) |
 | `webhooks` | `webhooks.ts` | Inbound handlers from Make.com |

@@ -47,6 +47,23 @@
 
 ## 📝 Changelog Entries
 
+### 2026-11-02 - Broadcast: scheduled broadcasts v2
+
+**Added**:
+- Setting a time in Schedule turns the Send button blue ("Schedule · <time>"); pressing it creates the schedule and clears the composer. `ScheduleModal` has `mode: 'set' | 'edit'`.
+- `ScheduledList`: on/off switch and press-to-edit; only active rows show.
+- `BroadcastHistory`: "Scheduled" badge, and a repeating series folds into one entry.
+- tRPC `whatsapp.setScheduledEnabled`, `updateScheduled`, `deleteScheduled`. `enqueueBroadcast` takes `scheduledMessageId`.
+- Migration `20261102010000_scheduled_messages_v2.sql`: `scheduled_messages.enabled`, `scheduled_messages.repeat_base_sent`, `whatsapp_broadcast_log.scheduled_message_id` (applied to production).
+
+**Changed**:
+- The cron skips disabled schedules and counts repeats with `occurrenceIndex` (`src/lib/schedule-repeat.ts`), so an edited series restarts from its new first send.
+- Scheduling stays hidden on the Exchange HQ account.
+
+**Testing**: Typecheck, lint, build and `npm test` on merged main.
+
+---
+
 ### 2026-11-02 - Broadcast: New numbers becomes the Exchange HQ WhatsApp account
 
 **Changed**:
