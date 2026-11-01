@@ -5,7 +5,8 @@
  * go through the messaging bridge; whatsapp.getPlatforms says whether each platform is
  * set up, and one that isn't renders the page with no groups or history and makes no
  * server calls for it. Clicking the Signal tab while it isn't connected also opens a
- * "not connected yet" popup.
+ * "not connected yet" popup. The New numbers tab sends to typed or imported phone
+ * numbers through WaSender, using the same queue with each number as a recipient.
  *
  * WhatsApp tab: compose and send text messages or images to one or more
  * WhatsApp groups across multiple accounts (aiit-automation, susu-closets, etc.).
@@ -24,7 +25,7 @@
  */
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import Image from 'next/image';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
@@ -33,7 +34,9 @@ import { ScheduleModal } from '@/components/modules/whatsapp-groups/ScheduleModa
 import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledList';
 import { SignalNotConnectedModal } from '@/components/modules/whatsapp-groups/SignalNotConnectedModal';
 import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
+import { NumbersInput } from '@/components/modules/broadcast/NumbersInput';
 import { PlatformIcon } from '@/components/modules/broadcast/PlatformIcon';
+import { parsePhoneNumbers } from '@/lib/phone-numbers';
 import { BROADCAST_PLATFORMS } from '@/lib/config/broadcast-platforms';
 import type { BroadcastPlatformId } from '@/lib/config/broadcast-platforms';
 import { accountsForPlatform } from '@/lib/config/whatsapp-accounts';
@@ -53,6 +56,7 @@ const NO_GROUPS: WhatsAppGroup[] = [];
 const MAX_CHARS = 1000;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
 const MAX_ATTACHMENTS = 10; // mirrors MAX_ATTACHMENTS_PER_BROADCAST in /api/whatsapp/broadcast
+const MAX_NUMBERS = 200; // mirrors MAX_GROUPS_PER_BROADCAST in /api/whatsapp/broadcast
 
 type Attachment = { file: File; preview: string };
 
@@ -71,6 +75,9 @@ export default function WhatsAppBroadcastPage() {
   const platformInfo = platformStatus?.find((p) => p.id === activePlatform);
   const connected = platformInfo?.connected ?? activePlatform === 'whatsapp';
   const accounts = platformInfo?.accounts ?? accountsForPlatform(activePlatform);
+  const isNumbers = activePlatform === 'numbers';
+  const [numbersText, setNumbersText] = useState('');
+  const numbers = useMemo(() => parsePhoneNumbers(numbersText).numbers, [numbersText]);
   const [activeAccount, setActiveAccount] = useState<WhatsAppAccountId>('aiit-automation');
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -118,9 +125,11 @@ export default function WhatsAppBroadcastPage() {
     refetch: refetchGroups,
   } = api.whatsapp.getGroups.useQuery(
     { accountId: activeAccount },
-    { staleTime: 5 * 60 * 1000, enabled: connected },
+    { staleTime: 5 * 60 * 1000, enabled: connected && !isNumbers },
   );
-  const groups = connected ? whatsappGroups : NO_GROUPS;
+  const groups = connected && !isNumbers ? whatsappGroups : NO_GROUPS;
+  const recipientCount = isNumbers ? numbers.length : selectedIds.size;
+  const recipientWord = isNumbers ? 'number' : 'group';
 
   const syncMutation = api.whatsapp.syncGroups.useMutation({
     onSuccess: (result) => {
@@ -132,7 +141,7 @@ export default function WhatsAppBroadcastPage() {
   });
 
   const isRefreshing = syncMutation.isPending;
-  const isLoading = connected && (groupsLoading || isRefreshing);
+  const isLoading = connected && !isNumbers && (groupsLoading || isRefreshing);
 
   // Show empty state if DB has no groups yet (first use)
   const notFetchedYet = groups.length === 0 && (!connected || (!groupsLoading && !groupsError));
@@ -265,10 +274,11 @@ export default function WhatsAppBroadcastPage() {
   const handleSend = useCallback(async () => {
     const hasMessage = message.trim().length > 0;
     const hasImage = attachments.length > 0;
-    if (!connected || (!hasMessage && !hasImage) || selectedIds.size === 0 || isSending) return;
+    if (!connected || (!hasMessage && !hasImage) || recipientCount === 0 || isSending) return;
+    if (isNumbers && numbers.length > MAX_NUMBERS) return;
 
     setIsSending(true);
-    const ids = Array.from(selectedIds);
+    const ids = isNumbers ? numbers : Array.from(selectedIds);
     const names = ids.map((id) => groups.find((g) => g.id === id)?.name ?? id);
 
     try {
@@ -291,6 +301,7 @@ export default function WhatsAppBroadcastPage() {
       setMessage('');
       setAttachments([]);
       setSelectedIds(new Set());
+      setNumbersText('');
       if (fileInputRef.current) fileInputRef.current.value = '';
       setBroadcastHistoryBump((n) => n + 1);
 
@@ -306,7 +317,7 @@ export default function WhatsAppBroadcastPage() {
       toast.success(
         ids.length === 1
           ? 'Queued — sending now. Safe to close this tab.'
-          : `Queued for ${ids.length} groups — one every ${interval} min, ${duration} in total. ` +
+          : `Queued for ${ids.length} ${recipientWord}s — one every ${interval} min, ${duration} in total. ` +
             `Safe to close this tab; track it in Broadcast History.`,
         { duration: 9000 },
       );
@@ -315,7 +326,7 @@ export default function WhatsAppBroadcastPage() {
     } finally {
       setIsSending(false);
     }
-  }, [message, attachments, selectedIds, isSending, activeAccount, groups, connected]);
+  }, [message, attachments, selectedIds, isSending, activeAccount, groups, connected, isNumbers, numbers, recipientCount, recipientWord]);
 
   const charCount = message.length;
   const charCountColor =
@@ -324,7 +335,8 @@ export default function WhatsAppBroadcastPage() {
   const canSend =
     connected &&
     (message.trim().length > 0 || attachments.length > 0) &&
-    selectedIds.size > 0 &&
+    recipientCount > 0 &&
+    !(isNumbers && numbers.length > MAX_NUMBERS) &&
     !isSending &&
     !isLoadingReuseImage;
 
@@ -345,7 +357,7 @@ export default function WhatsAppBroadcastPage() {
           </div>
         </div>
 
-        <button
+        {!isNumbers && <button
           onClick={handleRefresh}
           disabled={isLoading}
           className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-(--color-border-default) bg-white text-(--color-text-secondary) hover:bg-(--color-bg-hover) hover:border-(--color-border-strong) disabled:opacity-50 disabled:cursor-not-allowed transition-all"
@@ -359,7 +371,7 @@ export default function WhatsAppBroadcastPage() {
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
           {isLoading ? 'Refreshing...' : 'Refresh groups'}
-        </button>
+        </button>}
       </div>
 
       {/* Platform Tabs */}
@@ -417,7 +429,7 @@ export default function WhatsAppBroadcastPage() {
           <div className="px-5 py-4 border-b border-(--color-border-subtle)">
             <h2 className="text-sm font-semibold text-(--color-text-primary)">Compose Message</h2>
             <p className="text-xs text-(--color-text-muted) mt-0.5">
-              Add a message, image, or both — sent to all selected groups
+              Add a message, image, or both — sent to all {isNumbers ? 'numbers' : 'selected groups'}
             </p>
           </div>
 
@@ -492,7 +504,7 @@ export default function WhatsAppBroadcastPage() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="image/*"
+                      accept={isNumbers ? 'image/jpeg,image/png' : 'image/*'}
                       multiple
                       onChange={handleImageSelect}
                       className="hidden"
@@ -509,7 +521,7 @@ export default function WhatsAppBroadcastPage() {
                     <span className="text-xs text-(--color-text-muted) group-hover:text-(--pc) transition">
                       {attachments.length > 0 ? 'Add another image' : 'Attach image(s)'}{' '}
                       <span className="text-(--color-text-faint)">
-                        — optional, max 10MB each, up to {MAX_ATTACHMENTS}
+                        — optional, {isNumbers ? 'JPEG or PNG, max 5MB' : 'max 10MB'} each, up to {MAX_ATTACHMENTS}
                       </span>
                     </span>
                   </label>
@@ -542,15 +554,15 @@ export default function WhatsAppBroadcastPage() {
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
                     </svg>
-                    {selectedIds.size > 0
-                      ? `Send to ${selectedIds.size} group${selectedIds.size !== 1 ? 's' : ''}`
+                    {recipientCount > 0
+                      ? `Send to ${recipientCount} ${recipientWord}${recipientCount !== 1 ? 's' : ''}`
                       : 'Send now'}
                   </>
                 )}
               </button>
 
               {/* Schedule Send button */}
-              <button
+              {!isNumbers && <button
                 onClick={() => setScheduleModalOpen(true)}
                 disabled={!canSend}
                 title="Schedule message for later"
@@ -569,13 +581,14 @@ export default function WhatsAppBroadcastPage() {
                   <line x1="3" y1="10" x2="21" y2="10" />
                 </svg>
                 Schedule
-              </button>
+              </button>}
             </div>
 
             {/* Background-send note */}
             <p className="text-xs text-(--color-text-faint) leading-relaxed">
               Sends run in the background — once queued you can compose the next message
               or close this tab. Live progress appears in Broadcast History below.
+              {isNumbers && ' "Reply STOP to opt out." is added to the end of every message.'}
             </p>
           </div>
         </div>
@@ -583,12 +596,16 @@ export default function WhatsAppBroadcastPage() {
         {/* Right: Group selector */}
         <div className="rounded-xl border border-(--color-border-subtle) bg-white shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-(--color-border-subtle)">
-            <h2 className="text-sm font-semibold text-(--color-text-primary)">Select Groups</h2>
-            <p className="text-xs text-(--color-text-muted) mt-0.5">Choose which groups to broadcast to</p>
+            <h2 className="text-sm font-semibold text-(--color-text-primary)">{isNumbers ? 'Phone Numbers' : 'Select Groups'}</h2>
+            <p className="text-xs text-(--color-text-muted) mt-0.5">
+              {isNumbers ? 'Type or paste numbers, or import a CSV or Excel file' : 'Choose which groups to broadcast to'}
+            </p>
           </div>
 
           <div className="p-5" style={{ height: '460px', display: 'flex', flexDirection: 'column' }}>
-            <GroupSelector
+            {isNumbers && connected ? (
+              <NumbersInput text={numbersText} onTextChange={setNumbersText} maxNumbers={MAX_NUMBERS} />
+            ) : <GroupSelector
               groups={groups}
               loading={isLoading}
               isError={connected && groupsError}
@@ -609,7 +626,7 @@ export default function WhatsAppBroadcastPage() {
                   <p className="text-xs text-(--color-text-muted) mt-1">Your {platform.name} groups will show here once it is connected</p>
                 </div>
               )}
-            />
+            />}
           </div>
         </div>
       </div>
@@ -617,7 +634,7 @@ export default function WhatsAppBroadcastPage() {
       {connected ? (
         <>
           {/* Scheduled messages list */}
-          <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />
+          {!isNumbers && <ScheduledList accountId={activeAccount} onScheduleCreated={scheduleCreatedBump} />}
 
           {/* Broadcast history (immediate sends log) */}
           <BroadcastHistory

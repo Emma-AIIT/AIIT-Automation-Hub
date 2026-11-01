@@ -21,7 +21,7 @@
  * connection open past SEND_TIMEOUT_MS, which reports delivered sends as failures.
  */
 import type { createAdminClient } from "~/lib/supabase/admin";
-import { getPlatformName, getWebhookUrl, isTelegramDirect, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { getPlatformName, getWebhookUrl, isTelegramDirect, isWasender, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 
@@ -156,9 +156,9 @@ export function isTimeout(reason: unknown): boolean {
 
 export function describeSendError(reason: unknown): string {
   if (reason instanceof Error) {
-    // Telegram direct-mode timeouts (src/lib/server/telegram.ts) already carry
-    // their own explanation; the text below is about the Make.com scenario.
-    if (isTimeout(reason) && !reason.message.startsWith("Telegram")) {
+    // Telegram direct-mode and WaSender timeouts already carry their own
+    // explanation; the text below is about the Make.com scenario.
+    if (isTimeout(reason) && !/^(Telegram|WaSender)/.test(reason.message)) {
       return (
         `Make.com did not respond within ${SEND_TIMEOUT_MS / 1000}s, so it is unknown ` +
         `whether this group received the message. It was NOT re-sent, to avoid ` +
@@ -242,6 +242,19 @@ async function loadImages(
     files.push({ blob: data, name: log.file_names?.[i] ?? "image" });
   }
   return files;
+}
+
+/** Short-lived URLs for a broadcast's staged images, for senders that fetch them. */
+async function signImages(supabase: SupabaseAdmin, log: BroadcastLogRow): Promise<string[]> {
+  const urls: string[] = [];
+  for (const path of log.image_paths ?? []) {
+    const { data, error } = await supabase.storage.from(BROADCAST_BUCKET).createSignedUrl(path, 600);
+    if (error || !data) {
+      throw new Error(`Broadcast attachment missing from storage: ${error?.message ?? "not found"}`);
+    }
+    urls.push(data.signedUrl);
+  }
+  return urls;
 }
 
 /**
@@ -488,6 +501,11 @@ export async function drainBroadcastQueue(supabase: SupabaseAdmin): Promise<Drai
         const { sendTelegram } = await import("~/lib/server/telegram");
         const files = await loadImages(supabase, log);
         await sendTelegram({ chatId: row.chat_id, message: log.message, files, onAttachmentSent });
+      } else if (isWasender(accountId)) {
+        // WaSender fetches images itself, so it gets signed URLs, not the bytes.
+        const { sendWasender } = await import("~/lib/server/wasender");
+        const imageUrls = await signImages(supabase, log);
+        await sendWasender({ to: row.chat_id, message: log.message, imageUrls, onAttachmentSent });
       } else {
         const webhookUrl = getWebhookUrl(accountId as WhatsAppAccountId, "sendMessage");
         const files = await loadImages(supabase, log);

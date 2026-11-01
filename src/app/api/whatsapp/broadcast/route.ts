@@ -22,7 +22,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "~/lib/supabase/admin";
-import { getWebhookUrl, isTelegramDirect, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
+import { getWebhookUrl, isSendConfigured, isTelegramDirect, isWasender, WHATSAPP_ACCOUNTS } from "~/lib/config/whatsapp-accounts";
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import {
   BROADCAST_BUCKET,
@@ -43,6 +43,9 @@ const MAX_GROUPS_PER_BROADCAST = 200;
  *  large batch turns one broadcast into that many messages per group in a row.
  *  Capped well short of anything that would look like spam to a recipient. */
 const MAX_ATTACHMENTS_PER_BROADCAST = 10;
+
+const WASENDER_IMAGE_TYPES = ["image/jpeg", "image/png"];
+const WASENDER_MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
   try {
@@ -105,10 +108,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "A message or an attachment is required" }, { status: 400 });
     }
 
+    // WaSender takes JPEG and PNG images up to 5MB. Refuse anything else now rather
+    // than failing every number hours later.
+    if (isWasender(accountId)) {
+      const unsupported = files.find(
+        (f) => !WASENDER_IMAGE_TYPES.includes(f.type) || f.size > WASENDER_MAX_IMAGE_SIZE,
+      );
+      if (unsupported) {
+        return NextResponse.json(
+          { error: `"${unsupported.name}" must be a JPEG or PNG image of 5MB or less` },
+          { status: 400 },
+        );
+      }
+      if (!isSendConfigured(accountId)) {
+        return NextResponse.json({ error: "WASENDER_API_KEY is not set" }, { status: 400 });
+      }
+    }
+
     // Fail fast if this account's send webhook isn't configured - better here than
-    // on a cron tick hours from now. Telegram direct mode has no URL, so it is
-    // checked on its env vars instead.
-    if (!isTelegramDirect(accountId)) {
+    // on a cron tick hours from now. Telegram direct mode and WaSender have no URL,
+    // so they are checked on their env vars instead.
+    if (!isTelegramDirect(accountId) && !isWasender(accountId)) {
       try {
         getWebhookUrl(accountId, "sendMessage");
       } catch (err) {
