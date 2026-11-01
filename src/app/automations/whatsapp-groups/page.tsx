@@ -4,7 +4,8 @@
  * same queue, pacing, scheduling and history, keyed by account id. Telegram and Signal
  * go through the messaging bridge; whatsapp.getPlatforms says whether each platform is
  * set up, and one that isn't renders the page with no groups or history and makes no
- * server calls for it.
+ * server calls for it. Clicking the Signal tab while it isn't connected also opens a
+ * "not connected yet" popup.
  *
  * WhatsApp tab: compose and send text messages or images to one or more
  * WhatsApp groups across multiple accounts (aiit-automation, susu-closets, etc.).
@@ -30,6 +31,7 @@ import toast from 'react-hot-toast';
 import { GroupSelector } from '@/components/modules/whatsapp-groups/GroupSelector';
 import { ScheduleModal } from '@/components/modules/whatsapp-groups/ScheduleModal';
 import { ScheduledList } from '@/components/modules/whatsapp-groups/ScheduledList';
+import { SignalNotConnectedModal } from '@/components/modules/whatsapp-groups/SignalNotConnectedModal';
 import { BroadcastHistory } from '@/components/modules/whatsapp-groups/BroadcastHistory';
 import { PlatformIcon } from '@/components/modules/broadcast/PlatformIcon';
 import { BROADCAST_PLATFORMS } from '@/lib/config/broadcast-platforms';
@@ -75,6 +77,7 @@ export default function WhatsAppBroadcastPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSending, setIsSending] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [signalPopupOpen, setSignalPopupOpen] = useState(false);
   const [scheduleCreatedBump, setScheduleCreatedBump] = useState(0);
   const [broadcastHistoryBump, setBroadcastHistoryBump] = useState(0);
   const [isLoadingReuseImage, setIsLoadingReuseImage] = useState(false);
@@ -97,7 +100,14 @@ export default function WhatsAppBroadcastPage() {
     const first = accountsForPlatform(id)[0];
     if (first) setActiveAccount(first.id);
     setSelectedIds(new Set());
-  }, []);
+    // Check the clicked platform, not `connected`, which still describes the tab being
+    // left. Same rule as `connected`: a non-WhatsApp platform is not connected until
+    // getPlatforms says it is.
+    const clickedConnected = platformStatus?.find((p) => p.id === id)?.connected ?? id === 'whatsapp';
+    if (id === 'signal' && id !== activePlatform && !clickedConnected) setSignalPopupOpen(true);
+  }, [activePlatform, platformStatus]);
+
+  const handleSignalPopupClose = useCallback(() => setSignalPopupOpen(false), []);
 
   // Groups are loaded from Supabase DB — fast on every page load
   const {
@@ -652,6 +662,8 @@ export default function WhatsAppBroadcastPage() {
         groupNames={Array.from(selectedIds).map((id) => groups.find((g) => g.id === id)?.name ?? id)}
         onSuccess={() => setScheduleCreatedBump((n) => n + 1)}
       />}
+
+      <SignalNotConnectedModal isOpen={signalPopupOpen} onClose={handleSignalPopupClose} />
     </div>
   );
 }
