@@ -10,11 +10,31 @@ import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { ScheduledMessage } from '@/server/api/routers/whatsapp';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
+import { formatRepeatDay, formatRepeatTime } from '@/lib/schedule-repeat';
 
 const SYDNEY_TZ = 'Australia/Sydney';
 
 function formatSydneyTime(isoString: string): string {
   return formatInTimeZone(new Date(isoString), SYDNEY_TZ, "EEE d MMM · h:mm a zzz");
+}
+
+function isRepeating(s: ScheduledMessage): boolean {
+  return (s.repeat_interval ?? 'none') !== 'none' && (s.repeat_total ?? 1) > 1;
+}
+
+/** Sends not yet made (a pending series includes the one at scheduled_at). */
+function remainingSends(s: ScheduledMessage): number {
+  return Math.max(0, (s.repeat_total ?? 1) - (s.repeat_sent ?? 0));
+}
+
+/** "Repeats weekly · 1 of 4 sent · next Mon 10 Nov 9:00 am" */
+function repeatLine(s: ScheduledMessage): string {
+  const parts = [`Repeats ${s.repeat_interval}`, `${s.repeat_sent ?? 0} of ${s.repeat_total} sent`];
+  if (s.status === 'pending') {
+    const next = new Date(s.scheduled_at);
+    parts.push(`next ${formatRepeatDay(next)} ${formatRepeatTime(next)}`);
+  }
+  return parts.join(' · ');
 }
 
 const STATUS_STYLES: Record<ScheduledMessage['status'], { dot: string; label: string; badge: string }> = {
@@ -50,9 +70,13 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
     prevRef.current = onScheduleCreated;
   }
 
-  const handleCancel = (id: string) => {
-    if (!window.confirm('Cancel this scheduled message?')) return;
-    cancelMutation.mutate({ id });
+  const handleCancel = (schedule: ScheduledMessage) => {
+    const remaining = remainingSends(schedule);
+    const prompt = isRepeating(schedule)
+      ? `Cancel the remaining ${remaining} send${remaining !== 1 ? 's' : ''}?`
+      : 'Cancel this scheduled message?';
+    if (!window.confirm(prompt)) return;
+    cancelMutation.mutate({ id: schedule.id });
   };
 
   const pendingCount = schedules.filter((s) => s.status === 'pending').length;
@@ -135,6 +159,9 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
                       {formatSydneyTime(schedule.scheduled_at)}
                     </span>
                   </div>
+                  {isRepeating(schedule) && (
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1">{repeatLine(schedule)}</p>
+                  )}
                 </div>
 
                 {/* Right: badge + cancel */}
@@ -144,7 +171,7 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
                   </span>
                   {schedule.status === 'pending' && (
                     <button
-                      onClick={() => handleCancel(schedule.id)}
+                      onClick={() => handleCancel(schedule)}
                       disabled={cancelMutation.isPending}
                       title="Cancel scheduled message"
                       className="w-6 h-6 rounded-md flex items-center justify-center text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-50 transition disabled:opacity-40"

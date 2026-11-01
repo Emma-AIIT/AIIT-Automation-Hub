@@ -1116,6 +1116,19 @@ function StatusBadge({ status }: { status: Client['status'] }) {
 
 ---
 
+## 📝 Recent Updates
+
+### 2026-11-02 - Repeat option for scheduled broadcasts
+- **What Changed**: Schedule Send can repeat daily / weekly / monthly, 2-52 times (the count includes the first send). Works for every Broadcast platform because the scheduler is shared.
+- **Why**: Ali asked to repeat a WhatsApp post without re-scheduling it each time.
+- **Technical Notes**:
+  - One `scheduled_messages` row per series. New columns `repeat_interval`, `repeat_total`, `repeat_sent`, `repeat_anchor_at` (migration `20261102000000_scheduled_messages_repeat.sql`).
+  - `releaseScheduledMessages` (cron) claims each due row with an update conditional on `status` + `scheduled_at` before queuing it, so overlapping ticks never double-send. A series is re-armed to the next *future* Sydney wall-clock occurrence (missed slots are skipped, not fired back-to-back), then marked `sent` after its last send. A failed queue marks it `failed` and stops the series.
+  - Pure maths in `src/lib/schedule-repeat.ts` (`nextOccurrence`, `nextFutureOccurrence`, `describeSeries`), shared by the modal preview and the cron; tested in `tests/schedule-repeat.test.mjs` (DST and month-end clamping).
+- **Files Modified**: `ScheduleModal.tsx`, `ScheduledList.tsx`, `routers/whatsapp.ts` (`scheduleMessage` takes `repeatInterval`, `repeatTotal`), `api/cron/whatsapp/route.ts`.
+
+---
+
 ## 🚨 Common Pitfalls & Solutions
 
 ### 1. UPSERT Race Conditions

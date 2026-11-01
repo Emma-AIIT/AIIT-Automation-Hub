@@ -10,7 +10,10 @@
  *  2. Scheduled sends. Pending scheduled_messages whose time has passed are turned
  *     into paced broadcasts and handed to the same queue. They used to be blasted
  *     at every group at once via an uncapped Promise.allSettled - the same burst
- *     the dashboard path was fixed for.
+ *     the dashboard path was fixed for. A repeating series (daily / weekly /
+ *     monthly, N times) is one row that is re-armed for its next Sydney-time
+ *     occurrence after each send; rows are claimed before queuing so overlapping
+ *     ticks never send twice.
  *  3. Orphan sweep. Legacy rows from the old in-request fan-out could be abandoned
  *     mid-send with no terminal status, leaving "Sending..." forever. Those are
  *     marked "not_sent". Queue-backed broadcasts are deliberately excluded: they
@@ -22,6 +25,7 @@ import { getPlatformName, isSendConfigured, WHATSAPP_ACCOUNTS } from "~/lib/conf
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import { drainBroadcastQueue, enqueueBroadcast } from "~/lib/server/whatsapp-broadcast";
+import { nextFutureOccurrence, type RepeatInterval } from "~/lib/schedule-repeat";
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
@@ -137,6 +141,15 @@ async function sweepOrphanedBroadcasts(supabase: SupabaseAdmin): Promise<number>
  * Turns every due scheduled_message into a paced broadcast. The row is marked
  * "sent" once its groups are queued, not once they are delivered - delivery now
  * spans hours and is tracked on the broadcast itself, which the row points at.
+ *
+ * Repeating series (repeat_interval != 'none') keep one row: each send moves
+ * scheduled_at on to the next future occurrence (missed slots are skipped, see
+ * nextFutureOccurrence) and bumps repeat_sent; the last send marks it "sent".
+ *
+ * Every row is *claimed* before it is queued, with an update conditional on the
+ * status and scheduled_at this tick read. If two ticks overlap only one wins the
+ * claim, so a post is never queued twice. A failed queue marks the row "failed",
+ * which also stops the rest of a series.
  */
 async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number> {
   const { data: due, error } = await supabase
@@ -178,6 +191,40 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
       continue;
     }
 
+    // Rows written before the repeat migration have no repeat_* values.
+    const interval = ((msg.repeat_interval as RepeatInterval | null) ?? "none");
+    const total = (msg.repeat_total as number | null) ?? 1;
+    const sent = ((msg.repeat_sent as number | null) ?? 0) + 1;
+    const anchor = (msg.repeat_anchor_at as string | null) ?? (msg.scheduled_at as string);
+    const moreToCome = interval !== "none" && sent < total;
+
+    // Claim: either re-arm the series for its next slot or mark it done. Both are
+    // conditional on what this tick read, so an overlapping tick claims nothing.
+    const claimUpdate = moreToCome
+      ? {
+          scheduled_at: nextFutureOccurrence(anchor, interval, sent, new Date()).at.toISOString(),
+          repeat_sent: sent,
+          error: null,
+        }
+      : { status: "sent", sent_at: new Date().toISOString(), repeat_sent: sent, error: null };
+
+    const claim = await supabase
+      .from("scheduled_messages")
+      .update(claimUpdate)
+      .eq("id", msg.id)
+      .eq("status", "pending")
+      .eq("scheduled_at", msg.scheduled_at as string)
+      .select("id");
+
+    if (claim.error) {
+      console.error("[cron/whatsapp] could not claim scheduled message", msg.id, claim.error.message);
+      continue;
+    }
+    if (!claim.data || claim.data.length === 0) {
+      console.log(`[cron/whatsapp] scheduled message ${msg.id} already claimed by another tick`);
+      continue;
+    }
+
     try {
       const { broadcastId } = await enqueueBroadcast(supabase, {
         accountId,
@@ -186,14 +233,10 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
         groupNames,
       });
 
-      await supabase
-        .from("scheduled_messages")
-        .update({ status: "sent", sent_at: new Date().toISOString(), error: null })
-        .eq("id", msg.id);
-
       released++;
       console.log(
-        `[cron/whatsapp] scheduled message ${msg.id} queued as broadcast ${broadcastId} (${groupIds.length} groups)`,
+        `[cron/whatsapp] scheduled message ${msg.id} queued as broadcast ${broadcastId} (${groupIds.length} groups)` +
+          (interval !== "none" ? `, send ${sent} of ${total}` : ""),
       );
     } catch (err) {
       await fail(err instanceof Error ? err.message : "Could not queue the broadcast");

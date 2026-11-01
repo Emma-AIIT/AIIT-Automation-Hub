@@ -10,8 +10,32 @@ import { fromZonedTime, formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
+import {
+  REPEAT_DEFAULT,
+  REPEAT_MAX,
+  REPEAT_MIN,
+  describeSeries,
+  formatRepeatDay,
+  formatRepeatTime,
+  type RepeatInterval,
+} from '@/lib/schedule-repeat';
 
 const SYDNEY_TZ = 'Australia/Sydney';
+
+const REPEAT_OPTIONS: { value: RepeatInterval; label: string }[] = [
+  { value: 'none', label: 'Does not repeat' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+];
+
+const INPUT_CLASS =
+  'w-full min-h-[44px] rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10 transition';
+
+function clampTimes(n: number): number {
+  if (!Number.isFinite(n)) return REPEAT_DEFAULT;
+  return Math.min(REPEAT_MAX, Math.max(REPEAT_MIN, Math.round(n)));
+}
 
 function getSydneyToday(): string {
   // Use date-fns-tz for reliable timezone-aware date formatting in Node.js
@@ -31,6 +55,9 @@ interface ScheduleModalProps {
 export function ScheduleModal({ accountId, isOpen, onClose, message, groupIds, groupNames, onSuccess }: ScheduleModalProps) {
   const [date, setDate] = useState('');
   const [time, setTime] = useState('09:00');
+  const [repeat, setRepeat] = useState<RepeatInterval>('none');
+  // Kept as text so the field can be cleared while typing; clamped on use.
+  const [timesText, setTimesText] = useState(String(REPEAT_DEFAULT));
   const today = getSydneyToday();
 
   // Reset fields when modal opens
@@ -38,8 +65,19 @@ export function ScheduleModal({ accountId, isOpen, onClose, message, groupIds, g
     if (isOpen) {
       setDate(today);
       setTime('09:00');
+      setRepeat('none');
+      setTimesText(String(REPEAT_DEFAULT));
     }
   }, [isOpen, today]);
+
+  const times = repeat === 'none' ? 1 : clampTimes(Number(timesText));
+
+  // Live preview of the series; null until the date/time parse.
+  let seriesPreview: string | null = null;
+  if (repeat !== 'none' && date && time) {
+    const first = fromZonedTime(`${date}T${time}:00`, SYDNEY_TZ);
+    if (!Number.isNaN(first.getTime())) seriesPreview = describeSeries(first, repeat, times);
+  }
 
   const scheduleMutation = api.whatsapp.scheduleMessage.useMutation();
 
@@ -64,21 +102,28 @@ export function ScheduleModal({ accountId, isOpen, onClose, message, groupIds, g
         groupNames,
         message,
         scheduledAt: utcDate.toISOString(),
+        repeatInterval: repeat,
+        repeatTotal: times,
       });
 
-      // Format display time back in Sydney for the toast
-      const displayTime = new Date(utcDate).toLocaleString('en-AU', {
-        timeZone: SYDNEY_TZ,
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-        timeZoneName: 'short',
-      });
-
-      toast.success(`Message scheduled for ${displayTime}`);
+      if (repeat === 'none') {
+        // Format display time back in Sydney for the toast
+        const displayTime = new Date(utcDate).toLocaleString('en-AU', {
+          timeZone: SYDNEY_TZ,
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+          timeZoneName: 'short',
+        });
+        toast.success(`Message scheduled for ${displayTime}`);
+      } else {
+        toast.success(
+          `Scheduled ${repeat} ×${times}, first send ${formatRepeatDay(utcDate)} ${formatRepeatTime(utcDate)}`,
+        );
+      }
       onSuccess();
       onClose();
     } catch {
@@ -173,6 +218,43 @@ export function ScheduleModal({ accountId, isOpen, onClose, message, groupIds, g
                 className="w-full rounded-lg border border-[var(--color-border-default)] bg-white px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-primary)] focus:ring-2 focus:ring-[var(--color-accent-primary)]/10 transition"
               />
             </div>
+
+            {/* Repeat */}
+            <div className="flex gap-3">
+              <div className="space-y-1.5 flex-1">
+                <label htmlFor="schedule-repeat" className="text-xs font-medium text-[var(--color-text-secondary)]">Repeat</label>
+                <select
+                  id="schedule-repeat"
+                  value={repeat}
+                  onChange={(e) => setRepeat(e.target.value as RepeatInterval)}
+                  className={INPUT_CLASS}
+                >
+                  {REPEAT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              {repeat !== 'none' && (
+                <div className="space-y-1.5 w-32">
+                  <label htmlFor="schedule-times" className="text-xs font-medium text-[var(--color-text-secondary)]">Number of times</label>
+                  <input
+                    id="schedule-times"
+                    type="number"
+                    inputMode="numeric"
+                    min={REPEAT_MIN}
+                    max={REPEAT_MAX}
+                    step={1}
+                    value={timesText}
+                    onChange={(e) => setTimesText(e.target.value)}
+                    onBlur={() => setTimesText(String(clampTimes(Number(timesText))))}
+                    className={INPUT_CLASS}
+                  />
+                </div>
+              )}
+            </div>
+            {seriesPreview && (
+              <p className="text-xs text-[var(--color-text-muted)] -mt-1">{seriesPreview}</p>
+            )}
           </div>
 
           {/* Footer */}

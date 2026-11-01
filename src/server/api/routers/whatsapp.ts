@@ -48,6 +48,7 @@ import {
   predictSendTimes,
   BROADCAST_BUCKET,
 } from "~/lib/server/whatsapp-broadcast";
+import { REPEAT_INTERVALS, REPEAT_MAX, type RepeatInterval } from "~/lib/schedule-repeat";
 
 const accountIdSchema = z.enum(
   WHATSAPP_ACCOUNTS.map((a) => a.id) as [WhatsAppAccountId, ...WhatsAppAccountId[]]
@@ -63,6 +64,14 @@ export interface ScheduledMessage {
   sent_at: string | null;
   error: string | null;
   created_at: string;
+  /** Repeat series (see src/lib/schedule-repeat.ts). 'none' / 1 for one-off sends. */
+  repeat_interval: RepeatInterval;
+  /** Total posts in the series, counting the first. */
+  repeat_total: number;
+  /** Posts already queued. */
+  repeat_sent: number;
+  /** First send time; occurrences are counted from it. Null on pre-repeat rows. */
+  repeat_anchor_at: string | null;
 }
 
 export interface WhatsAppGroup {
@@ -771,10 +780,14 @@ export const whatsappRouter = createTRPCRouter({
         groupNames: z.array(z.string()),
         message: z.string().min(1),
         scheduledAt: z.string(), // ISO UTC string
+        repeatInterval: z.enum(REPEAT_INTERVALS).default("none"),
+        // Counts the first send: weekly x4 = 4 posts in total.
+        repeatTotal: z.number().int().min(1).max(REPEAT_MAX).default(1),
       })
     )
     .mutation(async ({ input }) => {
       const supabase = createAdminClient();
+      const repeatTotal = input.repeatInterval === "none" ? 1 : input.repeatTotal;
       const { error } = await supabase.from("scheduled_messages").insert({
         account_id: input.accountId,
         group_ids: input.groupIds,
@@ -782,6 +795,10 @@ export const whatsappRouter = createTRPCRouter({
         message: input.message,
         scheduled_at: input.scheduledAt,
         status: "pending",
+        repeat_interval: repeatTotal > 1 ? input.repeatInterval : "none",
+        repeat_total: repeatTotal,
+        repeat_sent: 0,
+        repeat_anchor_at: input.scheduledAt,
       });
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       return { success: true };
@@ -804,7 +821,8 @@ export const whatsappRouter = createTRPCRouter({
       return (data ?? []) as ScheduledMessage[];
     }),
 
-  // cancelScheduled: no account_id filter needed — UUID is globally unique
+  // cancelScheduled: no account_id filter needed — UUID is globally unique.
+  // On a repeating series this cancels every send not yet made (one row per series).
   cancelScheduled: publicProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {

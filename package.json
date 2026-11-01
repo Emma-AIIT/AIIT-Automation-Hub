@@ -14,7 +14,7 @@
     "preview": "next build && next start",
     "start": "next start",
     "telegram-login": "node scripts/telegram-login.mjs",
-    "test": "node --test tests/telegram.test.mjs",
+    "test": "node --test tests/telegram.test.mjs tests/schedule-repeat.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
