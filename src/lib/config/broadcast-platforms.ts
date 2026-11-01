@@ -13,7 +13,7 @@
  * page asks whatsapp.getPlatforms, which reports `connected` per platform.
  */
 
-export type BroadcastPlatformId = 'whatsapp' | 'telegram' | 'signal';
+export type BroadcastPlatformId = 'whatsapp' | 'telegram' | 'signal' | 'numbers';
 
 export type BroadcastPlatform = {
   id: BroadcastPlatformId;
@@ -26,4 +26,6 @@ export const BROADCAST_PLATFORMS: BroadcastPlatform[] = [
   { id: 'whatsapp', name: 'WhatsApp', color: '#25D366' },
   { id: 'telegram', name: 'Telegram', color: '#229ED9' },
   { id: 'signal', name: 'Signal', color: '#3A76F0' },
+  // WhatsApp to individual phone numbers through WaSender, not to groups
+  { id: 'numbers', name: 'New numbers', color: '#128C7E' },
 ];

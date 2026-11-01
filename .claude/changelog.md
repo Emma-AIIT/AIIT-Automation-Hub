@@ -47,6 +47,23 @@
 
 ## 📝 Changelog Entries
 
+### 2026-11-02 - Broadcast: New numbers tab (WaSender)
+
+**Added**:
+- A "New numbers" tab on the Broadcast page (`numbers` platform, `wasender-numbers` account). Numbers are typed or pasted, or imported from `.csv` or `.xlsx` in the browser (`NumbersInput.tsx`, `src/lib/phone-numbers.ts`). Bare numbers are read as Australian, then converted to E.164 and deduped.
+- `src/lib/server/wasender.ts`: `sendWasender()` posts to WaSender's `send-message` API, one message per image with the caption on the last. Every message gets "Reply STOP to opt out." added.
+- Optional env var `WASENDER_API_KEY`; the tab shows "isn't set up yet" until it is set.
+- Dependency `read-excel-file`.
+
+**Technical Details**:
+- No migration: each number is a `whatsapp_broadcast_queue` row with `chat_id` set to the number, so pacing, pause, cancel, history and alert emails are shared with group broadcasts. Same 200 recipient limit and same interval (15 minutes unless `WHATSAPP_BROADCAST_INTERVAL_MINUTES` changes it, for all accounts).
+- Images are JPEG or PNG up to 5MB, as WaSender requires, and reach it through 10 minute signed Supabase URLs.
+- Scheduling is hidden on this tab. STOP replies are not processed: they must be removed from future lists by hand.
+
+**Testing**: Typecheck, lint, build and `npm test`. No WaSender message was sent.
+
+---
+
 ### 2026-11-02 - Broadcast: Signal tab stays visible, with a "not connected" popup
 
 **Added**:

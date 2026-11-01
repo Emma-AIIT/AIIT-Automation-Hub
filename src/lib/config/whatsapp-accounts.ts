@@ -48,7 +48,8 @@ export type WhatsAppAccountId =
   | 'susu-closets'
   | 'gim-foundation'
   | 'telegram-ali'
-  | 'signal-aiit';
+  | 'signal-aiit'
+  | 'wasender-numbers';
 
 export type WebhookType =
   | 'syncGroups'
@@ -71,6 +72,7 @@ export const WHATSAPP_ACCOUNTS: WhatsAppAccount[] = [
   // { id: 'gim-foundation',  name: 'GIM Foundation',  color: 'green', platform: 'whatsapp' },  // not set up yet
   { id: 'telegram-ali',    name: "Ali's account", color: 'sky', platform: 'telegram' },
   { id: 'signal-aiit',     name: 'AIIT Signal', color: 'indigo', platform: 'signal' },
+  { id: 'wasender-numbers', name: 'WaSender', color: 'emerald', platform: 'numbers' },
 ];
 
 /** Accounts on one platform, in display order. */
@@ -133,6 +135,13 @@ export function getWebhookUrl(accountId: WhatsAppAccountId, type: WebhookType): 
       sendParticipantMessage: undefined, // WhatsApp-only
       syncParticipants:       undefined, // WhatsApp-only
     },
+    // Sends through the WaSender API with a key, so there are no URLs (isWasender).
+    'wasender-numbers': {
+      syncGroups:             undefined,
+      sendMessage:            undefined,
+      sendParticipantMessage: undefined,
+      syncParticipants:       undefined,
+    },
   };
 
   const url = map[accountId]?.[type];
@@ -160,12 +169,19 @@ export function isTelegramDirect(accountId: string): boolean {
   return accountId === 'telegram-ali' && getTelegramMode() === 'direct';
 }
 
+/** True when this account sends to phone numbers through WaSender rather than a URL. */
+export function isWasender(accountId: string): boolean {
+  return accountId === 'wasender-numbers';
+}
+
 /**
- * True when broadcasts on this account can be sent: Telegram direct mode, or a
- * send URL from getWebhookUrl. For "fail fast" checks before queueing. SERVER-SIDE ONLY.
+ * True when broadcasts on this account can be sent: Telegram direct mode, a WaSender
+ * key, or a send URL from getWebhookUrl. For "fail fast" checks before queueing.
+ * SERVER-SIDE ONLY.
  */
 export function isSendConfigured(accountId: WhatsAppAccountId): boolean {
   if (isTelegramDirect(accountId)) return true;
+  if (isWasender(accountId)) return !!env.WASENDER_API_KEY;
   try {
     getWebhookUrl(accountId, 'sendMessage');
     return true;
@@ -177,6 +193,7 @@ export function isSendConfigured(accountId: WhatsAppAccountId): boolean {
 /** True when an account has both its group sync and send set up. SERVER-SIDE ONLY. */
 export function isBroadcastConfigured(accountId: WhatsAppAccountId): boolean {
   if (isTelegramDirect(accountId)) return true;
+  if (isWasender(accountId)) return !!env.WASENDER_API_KEY;
   try {
     getWebhookUrl(accountId, 'syncGroups');
     getWebhookUrl(accountId, 'sendMessage');
