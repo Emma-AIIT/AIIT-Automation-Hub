@@ -8,15 +8,19 @@
  *    going out side by side.
  *  - "edit": opened by pressing a row in ScheduledList. Every field is filled in,
  *    message and groups are editable too, and "Save changes" calls
- *    whatsapp.updateScheduled. "Number of times" can't go below the sends already
- *    made + 1.
+ *    whatsapp.updateScheduled. "Number of times" can't go below the periods already
+ *    done + 1.
+ *
+ * A repeating schedule can send at up to REPEAT_TIMES_MAX times per day/week/
+ * month ("+ Add time") and can repeat "∞ Forever". "Number of times" counts
+ * periods, not posts: daily x4 at 9 am and 6 pm = 8 posts.
  *
  * All times are Sydney wall-clock. Schedules carry no attachments (by design).
  */
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { fromZonedTime, formatInTimeZone } from 'date-fns-tz';
+import { formatInTimeZone } from 'date-fns-tz';
 import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
@@ -24,9 +28,14 @@ import type { ScheduledMessage } from '@/server/api/routers/whatsapp';
 import {
   REPEAT_DEFAULT,
   REPEAT_MAX,
+  REPEAT_TIMES_MAX,
   SCHEDULE_TZ,
   describeSeries,
+  firstSlotOnDate,
   minRepeatTotal,
+  normaliseTimes,
+  sydneyTime,
+  totalPosts,
   type PendingSchedule,
   type RepeatInterval,
 } from '@/lib/schedule-repeat';
@@ -50,6 +59,19 @@ function clampTimes(n: number, min: number): number {
 
 function getSydneyToday(): string {
   return formatInTimeZone(new Date(), SCHEDULE_TZ, 'yyyy-MM-dd');
+}
+
+/** A sensible next time for "+ Add time": 18:00, else an hour after the last, not already used. */
+function suggestNextTime(existing: string[]): string {
+  const used = new Set(existing);
+  if (!used.has('18:00') && existing.every((t) => t < '18:00')) return '18:00';
+  const last = [...existing].sort().at(-1) ?? '09:00';
+  const [h, m] = last.split(':').map(Number) as [number, number];
+  for (let step = 1; step < 24; step++) {
+    const candidate = `${String((h + step) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return '12:00';
 }
 
 type SetModeProps = {
@@ -81,10 +103,12 @@ export function ScheduleModal(props: ScheduleModalProps) {
   const { isOpen, onClose, mode } = props;
   const editing = mode === 'edit' ? props.schedule : null;
   const alreadySent = editing?.repeat_sent ?? 0;
-  const minTimes = minRepeatTotal(alreadySent);
 
   const [date, setDate] = useState('');
-  const [time, setTime] = useState('09:00');
+  // Send times (Sydney "HH:mm"). Only the first is used when it doesn't repeat.
+  // Kept as typed; sorted and de-duplicated on blur and when used.
+  const [slotTimes, setSlotTimes] = useState<string[]>(['09:00']);
+  const [forever, setForever] = useState(false);
   const [repeat, setRepeat] = useState<RepeatInterval>('none');
   // Kept as text so the field can be cleared while typing; clamped on use.
   const [timesText, setTimesText] = useState(String(REPEAT_DEFAULT));
@@ -98,11 +122,13 @@ export function ScheduleModal(props: ScheduleModalProps) {
   // Fill the fields each time the modal opens.
   useEffect(() => {
     if (!isOpen) return;
-    const source = editing
+    const source: PendingSchedule | null | undefined = editing
       ? {
           scheduledAt: editing.scheduled_at,
           repeatInterval: editing.repeat_interval ?? 'none',
           repeatTotal: editing.repeat_total ?? 1,
+          repeatForever: editing.repeat_forever ?? false,
+          repeatTimes: editing.repeat_times ?? null,
         }
       : initialSet;
     if (source) {
@@ -110,15 +136,19 @@ export function ScheduleModal(props: ScheduleModalProps) {
       // A passed time (re-enabling a one-off) starts from today rather than the past.
       const passed = at.getTime() <= Date.now();
       setDate(passed ? today : formatInTimeZone(at, SCHEDULE_TZ, 'yyyy-MM-dd'));
-      setTime(formatInTimeZone(at, SCHEDULE_TZ, 'HH:mm'));
+      const savedTimes = source.repeatTimes && source.repeatTimes.length > 0 ? source.repeatTimes : null;
+      setSlotTimes(savedTimes ? [...savedTimes] : [sydneyTime(at)]);
       setRepeat(source.repeatInterval);
+      setForever(source.repeatInterval !== 'none' && (source.repeatForever ?? false));
+      const min = minRepeatTotal(alreadySent, savedTimes?.length ?? 1);
       setTimesText(
-        String(source.repeatInterval === 'none' ? Math.max(minTimes, REPEAT_DEFAULT) : Math.max(minTimes, source.repeatTotal)),
+        String(source.repeatInterval === 'none' ? Math.max(min, REPEAT_DEFAULT) : Math.max(min, source.repeatTotal)),
       );
     } else {
       setDate(today);
-      setTime('09:00');
+      setSlotTimes(['09:00']);
       setRepeat('none');
+      setForever(false);
       setTimesText(String(REPEAT_DEFAULT));
     }
     if (editing) {
@@ -154,31 +184,51 @@ export function ScheduleModal(props: ScheduleModalProps) {
     });
   }, [groupOptions, groupSearch, editGroupIds]);
 
+  // The times actually used: one for a one-off, the sorted unique list otherwise.
+  const effectiveTimes =
+    repeat === 'none' ? normaliseTimes(slotTimes.slice(0, 1)) : normaliseTimes(slotTimes);
+  const minTimes = minRepeatTotal(alreadySent, effectiveTimes.length || 1);
   const times = repeat === 'none' ? 1 : clampTimes(Number(timesText), minTimes);
+  const isForever = repeat !== 'none' && forever;
+
+  // First send: the earliest of the times on the chosen date that is still ahead
+  // (so an edit made part-way through the day starts from the next slot).
+  const firstSend = date && effectiveTimes.length > 0 ? firstSlotOnDate(date, effectiveTimes) : null;
 
   // Live preview of the remaining series; null until the date/time parse.
   let seriesPreview: string | null = null;
-  if (repeat !== 'none' && date && time) {
-    const first = fromZonedTime(`${date}T${time}:00`, SCHEDULE_TZ);
-    if (!Number.isNaN(first.getTime())) seriesPreview = describeSeries(first, repeat, times - alreadySent);
+  if (repeat !== 'none' && firstSend) {
+    seriesPreview = describeSeries(firstSend, repeat, times, {
+      forever: isForever,
+      times: effectiveTimes,
+      posts: totalPosts(times, effectiveTimes) - alreadySent,
+    });
   }
 
   const utils = api.useUtils();
   const updateMutation = api.whatsapp.updateScheduled.useMutation();
 
   const handleConfirm = async () => {
-    if (!date || !time) {
+    if (!date || effectiveTimes.length === 0) {
       toast.error('Please select a date and time');
       return;
     }
-    const utcDate = fromZonedTime(`${date}T${time}:00`, SCHEDULE_TZ);
-    if (utcDate <= new Date()) {
+    if (!firstSend) {
       toast.error('Scheduled time must be in the future');
       return;
     }
+    const scheduledAt = firstSend.toISOString();
+    // A single time is stored as null (the anchor's own time).
+    const repeatTimes = repeat !== 'none' && effectiveTimes.length > 1 ? effectiveTimes : null;
 
     if (props.mode === 'set') {
-      props.onSet({ scheduledAt: utcDate.toISOString(), repeatInterval: repeat, repeatTotal: times });
+      props.onSet({
+        scheduledAt,
+        repeatInterval: repeat,
+        repeatTotal: times,
+        repeatForever: isForever,
+        repeatTimes,
+      });
       onClose();
       return;
     }
@@ -199,9 +249,11 @@ export function ScheduleModal(props: ScheduleModalProps) {
         message,
         groupIds: ids.map((g) => g.id),
         groupNames: ids.map((g) => g.name),
-        scheduledAt: utcDate.toISOString(),
+        scheduledAt,
         repeatInterval: repeat,
         repeatTotal: times,
+        repeatForever: isForever,
+        repeatTimes: repeatTimes ?? undefined,
         enable: props.enableOnSave ?? false,
       });
       toast.success('Schedule updated');
@@ -342,16 +394,50 @@ export function ScheduleModal(props: ScheduleModalProps) {
               />
             </div>
 
-            {/* Time */}
+            {/* Times: one for a one-off; up to REPEAT_TIMES_MAX per period when repeating */}
             <div className="space-y-1.5">
-              <label htmlFor="schedule-time" className="text-xs font-medium text-[var(--color-text-secondary)]">Time <span className="text-[var(--color-text-faint)] font-normal">(Sydney)</span></label>
-              <input
-                id="schedule-time"
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className={INPUT_CLASS}
-              />
+              <label htmlFor="schedule-time-0" className="text-xs font-medium text-[var(--color-text-secondary)]">
+                {repeat !== 'none' && slotTimes.length > 1 ? 'Times' : 'Time'}{' '}
+                <span className="text-[var(--color-text-faint)] font-normal">(Sydney)</span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {(repeat === 'none' ? slotTimes.slice(0, 1) : slotTimes).map((t, i) => (
+                  <div key={i} className={`flex items-center gap-1 ${i === 0 && (repeat === 'none' || slotTimes.length === 1) ? 'w-full' : ''}`}>
+                    <input
+                      id={`schedule-time-${i}`}
+                      type="time"
+                      value={t}
+                      aria-label={`Send time ${i + 1}`}
+                      onChange={(e) =>
+                        setSlotTimes((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))
+                      }
+                      onBlur={() => setSlotTimes((prev) => (prev.length > 1 ? normaliseTimes(prev) : prev))}
+                      className={`${INPUT_CLASS} ${i === 0 && (repeat === 'none' || slotTimes.length === 1) ? '' : 'w-[8.5rem]'}`}
+                    />
+                    {i > 0 && repeat !== 'none' && (
+                      <button
+                        type="button"
+                        onClick={() => setSlotTimes((prev) => prev.filter((_, j) => j !== i))}
+                        aria-label={`Remove ${t}`}
+                        className="w-11 h-11 rounded-full flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {repeat !== 'none' && slotTimes.length < REPEAT_TIMES_MAX && (
+                  <button
+                    type="button"
+                    onClick={() => setSlotTimes((prev) => normaliseTimes([...prev, suggestNextTime(prev)]))}
+                    className="min-h-[44px] px-3 rounded-lg text-sm font-medium text-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/10 transition"
+                  >
+                    + Add time
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Repeat */}
@@ -379,17 +465,36 @@ export function ScheduleModal(props: ScheduleModalProps) {
                     min={minTimes}
                     max={REPEAT_MAX}
                     step={1}
-                    value={timesText}
+                    value={isForever ? '' : timesText}
+                    placeholder={isForever ? '∞' : undefined}
+                    disabled={isForever}
                     onChange={(e) => setTimesText(e.target.value)}
                     onBlur={() => setTimesText(String(clampTimes(Number(timesText), minTimes)))}
-                    className={INPUT_CLASS}
+                    className={`${INPUT_CLASS} disabled:bg-[var(--color-bg-secondary)] disabled:text-[var(--color-text-faint)]`}
                   />
                 </div>
               )}
             </div>
+            {repeat !== 'none' && (
+              <label className="flex items-center gap-2.5 min-h-[44px] -mt-2 cursor-pointer w-fit">
+                <input
+                  type="checkbox"
+                  checked={forever}
+                  onChange={(e) => setForever(e.target.checked)}
+                  className="w-4 h-4 accent-[var(--color-accent-primary)]"
+                />
+                <span className="text-sm text-[var(--color-text-primary)]">∞ Forever</span>
+                <span className="text-xs text-[var(--color-text-muted)]">until you switch it off</span>
+              </label>
+            )}
+            {repeat !== 'none' && effectiveTimes.length > 1 && !isForever && (
+              <p className="text-xs text-[var(--color-text-muted)] -mt-1">
+                Number of times counts {repeat === 'daily' ? 'days' : repeat === 'weekly' ? 'weeks' : 'months'}, not posts.
+              </p>
+            )}
             {alreadySent > 0 && (
               <p className="text-xs text-[var(--color-text-muted)] -mt-1">
-                {alreadySent} already sent{repeat !== 'none' ? ', counted in Number of times' : ''}.
+                {alreadySent} already sent{repeat !== 'none' && !isForever ? ', counted in Number of times' : ''}.
               </p>
             )}
             {seriesPreview && (
@@ -407,7 +512,7 @@ export function ScheduleModal(props: ScheduleModalProps) {
             </button>
             <button
               onClick={() => void handleConfirm()}
-              disabled={updateMutation.isPending || !date || !time}
+              disabled={updateMutation.isPending || !date || effectiveTimes.length === 0}
               className="flex-1 min-h-[44px] flex items-center justify-center gap-2 rounded-lg bg-[#3b82f6] hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold text-white transition"
             >
               {updateMutation.isPending ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Set schedule'}

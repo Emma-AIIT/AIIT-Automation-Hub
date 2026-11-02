@@ -10,6 +10,9 @@
  * skipped by the cron and shown as Paused), and pressing it opens ScheduleModal in
  * edit mode. Switching on a one-off whose time has passed opens the editor to pick
  * a new time instead.
+ *
+ * A "∞ Forever" series never finishes, so it stays here ("12 sent · next …")
+ * until it is switched off or stopped with the bin button.
  */
 'use client';
 
@@ -19,7 +22,13 @@ import { api } from '@/trpc/react';
 import toast from 'react-hot-toast';
 import type { ScheduledMessage } from '@/server/api/routers/whatsapp';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
-import { SCHEDULE_TZ, formatRepeatDay, formatRepeatTime } from '@/lib/schedule-repeat';
+import {
+  SCHEDULE_TZ,
+  describeRepeatStatus,
+  formatRepeatDay,
+  formatRepeatTime,
+  totalPosts,
+} from '@/lib/schedule-repeat';
 import { ScheduleModal } from './ScheduleModal';
 
 function formatSydneyTime(isoString: string): string {
@@ -27,22 +36,24 @@ function formatSydneyTime(isoString: string): string {
 }
 
 function isRepeating(s: ScheduledMessage): boolean {
-  return (s.repeat_interval ?? 'none') !== 'none' && (s.repeat_total ?? 1) > 1;
+  if ((s.repeat_interval ?? 'none') === 'none') return false;
+  return !!s.repeat_forever || totalPosts(s.repeat_total ?? 1, s.repeat_times) > 1;
 }
 
 /** Sends not yet made (a pending series includes the one at scheduled_at). */
 function remainingSends(s: ScheduledMessage): number {
-  return Math.max(0, (s.repeat_total ?? 1) - (s.repeat_sent ?? 0));
+  return Math.max(0, totalPosts(s.repeat_total ?? 1, s.repeat_times) - (s.repeat_sent ?? 0));
 }
 
-/** "Repeats weekly · 1 of 4 sent · next Mon 10 Nov 9:00 am" */
+/**
+ * "Repeats weekly · 1 of 4 sent · next Mon 10 Nov 9:00 am" or, forever,
+ * "Repeats daily at 9:00 am & 6:00 pm ∞ · 12 sent · next Tue 3 Nov 6:00 pm".
+ * Paused rows already carry a Paused badge, so "paused" is left off here.
+ */
 function repeatLine(s: ScheduledMessage): string {
-  const parts = [`Repeats ${s.repeat_interval}`, `${s.repeat_sent ?? 0} of ${s.repeat_total} sent`];
-  if (s.status === 'pending' && s.enabled !== false) {
-    const next = new Date(s.scheduled_at);
-    parts.push(`next ${formatRepeatDay(next)} ${formatRepeatTime(next)}`);
-  }
-  return parts.join(' · ');
+  return describeRepeatStatus(s)
+    .filter((p) => p !== 'paused')
+    .join(' · ');
 }
 
 /** iOS/Android-style switch: green on, grey off. The button itself is 44px tall. */
@@ -118,9 +129,11 @@ export function ScheduledList({ accountId, onScheduleCreated }: ScheduledListPro
 
   const handleCancel = (schedule: ScheduledMessage) => {
     const remaining = remainingSends(schedule);
-    const prompt = isRepeating(schedule)
-      ? `Cancel the remaining ${remaining} send${remaining !== 1 ? 's' : ''}?`
-      : 'Cancel this scheduled message?';
+    const prompt = schedule.repeat_forever && isRepeating(schedule)
+      ? 'Stop this schedule? It will not send again.'
+      : isRepeating(schedule)
+        ? `Cancel the remaining ${remaining} send${remaining !== 1 ? 's' : ''}?`
+        : 'Cancel this scheduled message?';
     if (!window.confirm(prompt)) return;
     cancelMutation.mutate({ id: schedule.id });
   };

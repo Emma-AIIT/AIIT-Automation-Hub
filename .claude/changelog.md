@@ -47,6 +47,22 @@
 
 ## 📝 Changelog Entries
 
+### 2026-11-02 - Broadcast: "∞ Forever" repeat and several times per day
+
+**Added**:
+- Schedule window: "+ Add time" (up to 4 Sydney times per day/week/month, sorted, ✕ to remove) and an "∞ Forever" checkbox that greys out Number of times. Preview reads "8 posts: Tue 3 Nov … last Fri 6 Nov at 9:00 am & 6:00 pm" or "Sends every day at … until you switch it off".
+- `scheduleMessage` and `updateScheduled` take `repeatForever` (boolean, default false) and `repeatTimes` (`HH:mm[]`, max 4, sorted/unique, must include the Sydney time of `scheduledAt`). `PendingSchedule` gains `repeatForever`, `repeatTimes`.
+- `src/lib/schedule-repeat.ts`: `nextOccurrence`/`nextFutureOccurrence`/`rearmOnEnable` take `times`; new `hasMoreToCome`, `totalPosts`, `slotsPerPeriod`, `firstSlotOnDate`, `describeRepeatStatus`, `normaliseTimes`, `validateTimes`, `formatHHMM`, `formatTimesList`, `sydneyTime`, `sydneyDate`, `fromSydney`, `REPEAT_TIMES_MAX`. `minRepeatTotal(sent, slots)` and `describeSeries(…, { forever, times, posts })` extended.
+- Migration `20261102020000_scheduled_messages_forever_times.sql`: `scheduled_messages.repeat_forever`, `scheduled_messages.repeat_times` (additive).
+
+**Changed**:
+- "Number of times" counts periods, not posts. The cron re-arms while `hasMoreToCome` (forever never finishes); a forever row stays in Scheduled ("12 sent · next …") and its bin asks "Stop this schedule? It will not send again."
+- Composer chip: "Schedule · Tue 3 Nov 9:00 am & 6:00 pm, daily ∞".
+
+**Testing**: `tests/schedule-repeat.test.mjs` covers two times across both DST changes, monthly on the 31st, skipping missed slots mid-day, forever never finishing and an edit re-anchoring mid-day. Typecheck, lint, build and `npm test` on merged main.
+
+---
+
 ### 2026-11-02 - Broadcast: scheduled broadcasts v2
 
 **Added**:
