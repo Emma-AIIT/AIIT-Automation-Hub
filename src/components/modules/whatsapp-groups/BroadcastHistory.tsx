@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
 import { api } from '@/trpc/react';
 import type { BroadcastLogEntry } from '@/server/api/routers/whatsapp';
 import type { WhatsAppAccountId } from '@/lib/config/whatsapp-accounts';
-import { formatRepeatDay, formatRepeatTime } from '@/lib/schedule-repeat';
+import { describeRepeatStatus } from '@/lib/schedule-repeat';
 
 /** Blue badge on every broadcast a schedule produced. */
 function ScheduledBadge() {
@@ -355,18 +355,9 @@ export function BroadcastHistory({ accountId, refreshBump, onReuse }: BroadcastH
             const preview = message.length > 70 ? message.slice(0, 70) + '…' : message;
             const parts: string[] = [];
             if (schedule && schedule.repeat_interval !== 'none') {
-              parts.push(`repeats ${schedule.repeat_interval}`);
-              parts.push(`${schedule.repeat_sent} of ${schedule.repeat_total} sent`);
-              if (schedule.status === 'pending') {
-                const next = new Date(schedule.scheduled_at);
-                parts.push(
-                  schedule.enabled === false
-                    ? 'paused'
-                    : `next ${formatRepeatDay(next)} ${formatRepeatTime(next)}`,
-                );
-              } else if (schedule.status === 'cancelled') {
-                parts.push('cancelled');
-              }
+              const [first, ...rest] = describeRepeatStatus(schedule);
+              // Lower-case "repeats …" to match the rest of this line.
+              parts.push(first!.charAt(0).toLowerCase() + first!.slice(1), ...rest);
             } else {
               parts.push(`${entries.length} sends`);
             }

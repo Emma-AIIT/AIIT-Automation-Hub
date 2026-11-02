@@ -367,6 +367,8 @@ export default function WhatsAppBroadcastPage() {
         scheduledAt: pendingSchedule.scheduledAt,
         repeatInterval: pendingSchedule.repeatInterval,
         repeatTotal: pendingSchedule.repeatTotal,
+        repeatForever: pendingSchedule.repeatForever ?? false,
+        repeatTimes: pendingSchedule.repeatTimes ?? undefined,
       });
       setMessage('');
       setAttachments([]);

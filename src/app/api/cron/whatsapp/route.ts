@@ -25,7 +25,13 @@ import { getPlatformName, isSendConfigured, WHATSAPP_ACCOUNTS } from "~/lib/conf
 import type { WhatsAppAccountId } from "~/lib/config/whatsapp-accounts";
 import { sendAlertEmail } from "~/lib/server/alerts";
 import { drainBroadcastQueue, enqueueBroadcast } from "~/lib/server/whatsapp-broadcast";
-import { nextFutureOccurrence, occurrenceIndex, type RepeatInterval } from "~/lib/schedule-repeat";
+import {
+  hasMoreToCome,
+  nextFutureOccurrence,
+  occurrenceIndex,
+  totalPosts,
+  type RepeatInterval,
+} from "~/lib/schedule-repeat";
 
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
@@ -145,6 +151,8 @@ async function sweepOrphanedBroadcasts(supabase: SupabaseAdmin): Promise<number>
  * Repeating series (repeat_interval != 'none') keep one row: each send moves
  * scheduled_at on to the next future occurrence (missed slots are skipped, see
  * nextFutureOccurrence) and bumps repeat_sent; the last send marks it "sent".
+ * Each time slot (repeat_times) is its own broadcast, so per-account pacing still
+ * applies; a forever series (repeat_forever) is never marked "sent".
  *
  * Every row is *claimed* before it is queued, with an update conditional on the
  * status and scheduled_at this tick read. If two ticks overlap only one wins the
@@ -196,10 +204,20 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
 
     // Rows written before the repeat migration have no repeat_* values.
     const interval = ((msg.repeat_interval as RepeatInterval | null) ?? "none");
-    const total = (msg.repeat_total as number | null) ?? 1;
     const sent = ((msg.repeat_sent as number | null) ?? 0) + 1;
     const anchor = (msg.repeat_anchor_at as string | null) ?? (msg.scheduled_at as string);
-    const moreToCome = interval !== "none" && sent < total;
+    // Several times per period (repeat_times) and "∞ Forever" (repeat_forever):
+    // a finite series makes repeat_total x times posts; forever never finishes.
+    const times = (msg.repeat_times as string[] | null) ?? null;
+    const moreToCome = hasMoreToCome(
+      {
+        repeat_interval: interval,
+        repeat_total: msg.repeat_total as number | null,
+        repeat_forever: msg.repeat_forever as boolean | null,
+        repeat_times: times,
+      },
+      sent,
+    );
     // An edited series is re-anchored at its new first send; sends made before the
     // edit (repeat_base_sent) don't count towards the occurrence index.
     const nextIndex = occurrenceIndex(sent, msg.repeat_base_sent as number | null);
@@ -208,7 +226,7 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
     // conditional on what this tick read, so an overlapping tick claims nothing.
     const claimUpdate = moreToCome
       ? {
-          scheduled_at: nextFutureOccurrence(anchor, interval, nextIndex, new Date()).at.toISOString(),
+          scheduled_at: nextFutureOccurrence(anchor, interval, nextIndex, new Date(), times).at.toISOString(),
           repeat_sent: sent,
           error: null,
         }
@@ -245,7 +263,11 @@ async function releaseScheduledMessages(supabase: SupabaseAdmin): Promise<number
       released++;
       console.log(
         `[cron/whatsapp] scheduled message ${msg.id} queued as broadcast ${broadcastId} (${groupIds.length} groups)` +
-          (interval !== "none" ? `, send ${sent} of ${total}` : ""),
+          (interval !== "none"
+            ? msg.repeat_forever
+              ? `, send ${sent} (forever)`
+              : `, send ${sent} of ${totalPosts((msg.repeat_total as number | null) ?? 1, times)}`
+            : ""),
       );
     } catch (err) {
       await fail(err instanceof Error ? err.message : "Could not queue the broadcast");

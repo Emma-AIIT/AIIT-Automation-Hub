@@ -55,10 +55,40 @@ import {
 import {
   REPEAT_INTERVALS,
   REPEAT_MAX,
+  REPEAT_TIMES_MAX,
   minRepeatTotal,
   rearmOnEnable,
+  slotsPerPeriod,
+  sydneyTime,
+  validateTimes,
   type RepeatInterval,
 } from "~/lib/schedule-repeat";
+
+/** Sydney "HH:mm" send times per period (scheduled_messages.repeat_times). */
+const repeatTimesSchema = z
+  .array(z.string().regex(/^\d{2}:\d{2}$/))
+  .max(REPEAT_TIMES_MAX)
+  .optional();
+
+/**
+ * Checks repeatTimes against scheduledAt and returns what to store in
+ * repeat_times: null for a one-off or a single time (the anchor's own time).
+ * The first send must sit on one of the times. Normally it is the first, but an
+ * edit made part-way through the day anchors on a later one (e.g. 6 pm).
+ */
+function resolveRepeatTimes(
+  interval: RepeatInterval,
+  scheduledAt: string,
+  times: string[] | undefined,
+): string[] | null {
+  if (interval === "none" || !times || times.length === 0) return null;
+  const problem = validateTimes(times);
+  if (problem) throw new TRPCError({ code: "BAD_REQUEST", message: problem });
+  if (!times.includes(sydneyTime(scheduledAt))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "The first send must be at one of the chosen times" });
+  }
+  return times.length > 1 ? times : null;
+}
 
 const accountIdSchema = z.enum(
   WHATSAPP_ACCOUNTS.map((a) => a.id) as [WhatsAppAccountId, ...WhatsAppAccountId[]]
@@ -86,6 +116,10 @@ export interface ScheduledMessage {
   enabled: boolean;
   /** repeat_sent when the series was last edited (see occurrenceIndex). */
   repeat_base_sent: number;
+  /** Repeats until switched off or deleted; never reaches "sent". repeat_total is ignored. */
+  repeat_forever: boolean;
+  /** Sydney "HH:mm" sends per period, sorted; null = the single time of repeat_anchor_at. */
+  repeat_times: string[] | null;
 }
 
 /** The schedule a broadcast came from, as Broadcast History needs it. */
@@ -93,6 +127,8 @@ export interface BroadcastSchedule {
   repeat_interval: RepeatInterval;
   repeat_total: number;
   repeat_sent: number;
+  repeat_forever: boolean;
+  repeat_times: string[] | null;
   scheduled_at: string;
   status: ScheduledMessage["status"];
   enabled: boolean;
@@ -539,15 +575,20 @@ export const whatsappRouter = createTRPCRouter({
       if (scheduleIds.length > 0) {
         const { data: scheduleRows } = await supabase
           .from("scheduled_messages")
-          .select("id, repeat_interval, repeat_total, repeat_sent, scheduled_at, status, enabled")
+          .select("*")
           .in("id", scheduleIds);
-        for (const s of (scheduleRows ?? []) as (BroadcastSchedule & { id: string })[]) {
-          const { id, ...rest } = s;
-          schedules.set(id, {
-            ...rest,
-            repeat_interval: rest.repeat_interval ?? "none",
-            repeat_total: rest.repeat_total ?? 1,
-            repeat_sent: rest.repeat_sent ?? 0,
+        for (const s of (scheduleRows ?? []) as (Partial<ScheduledMessage> & { id: string })[]) {
+          // select("*") so this keeps working before and after the forever/times
+          // migration; missing columns fall back to their defaults.
+          schedules.set(s.id, {
+            repeat_interval: s.repeat_interval ?? "none",
+            repeat_total: s.repeat_total ?? 1,
+            repeat_sent: s.repeat_sent ?? 0,
+            repeat_forever: s.repeat_forever ?? false,
+            repeat_times: s.repeat_times ?? null,
+            scheduled_at: s.scheduled_at ?? "",
+            status: s.status ?? "pending",
+            enabled: s.enabled ?? true,
           });
         }
       }
@@ -888,13 +929,19 @@ export const whatsappRouter = createTRPCRouter({
         message: z.string().min(1),
         scheduledAt: z.string(), // ISO UTC string
         repeatInterval: z.enum(REPEAT_INTERVALS).default("none"),
-        // Counts the first send: weekly x4 = 4 posts in total.
+        // Counts periods including the first: weekly x4 = 4 weeks. With several
+        // repeatTimes, daily x4 at 9 am and 6 pm = 8 posts. Ignored when forever.
         repeatTotal: z.number().int().min(1).max(REPEAT_MAX).default(1),
+        repeatForever: z.boolean().default(false),
+        repeatTimes: repeatTimesSchema,
       })
     )
     .mutation(async ({ input }) => {
       const supabase = createAdminClient();
+      const forever = input.repeatInterval !== "none" && input.repeatForever;
       const repeatTotal = input.repeatInterval === "none" ? 1 : input.repeatTotal;
+      const repeatTimes = resolveRepeatTimes(input.repeatInterval, input.scheduledAt, input.repeatTimes);
+      const repeating = forever || repeatTotal > 1;
       const { error } = await supabase.from("scheduled_messages").insert({
         account_id: input.accountId,
         group_ids: input.groupIds,
@@ -902,10 +949,14 @@ export const whatsappRouter = createTRPCRouter({
         message: input.message,
         scheduled_at: input.scheduledAt,
         status: "pending",
-        repeat_interval: repeatTotal > 1 ? input.repeatInterval : "none",
+        repeat_interval: repeating ? input.repeatInterval : "none",
         repeat_total: repeatTotal,
         repeat_sent: 0,
         repeat_anchor_at: input.scheduledAt,
+        // Only written when used, so a plain schedule still saves if the
+        // forever/times migration hasn't reached this database.
+        ...(forever ? { repeat_forever: true } : {}),
+        ...(repeating && repeatTimes ? { repeat_times: repeatTimes } : {}),
       });
       if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       return { success: true };
@@ -941,13 +992,15 @@ export const whatsappRouter = createTRPCRouter({
       const supabase = createAdminClient();
       const { data, error: readError } = await supabase
         .from("scheduled_messages")
-        .select("status, scheduled_at, repeat_interval, repeat_anchor_at, repeat_sent, repeat_base_sent")
+        // "*" so repeat_times is read once the forever/times migration is applied
+        // and the select still works before it.
+        .select("*")
         .eq("id", input.id)
         .single();
       const row = data as Pick<
         ScheduledMessage,
         "status" | "scheduled_at" | "repeat_interval" | "repeat_anchor_at" | "repeat_sent" | "repeat_base_sent"
-      > | null;
+      > & { repeat_times?: string[] | null } | null;
       if (readError || !row) throw new TRPCError({ code: "NOT_FOUND", message: "Schedule not found" });
       if (row.status !== "pending") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "This schedule has already finished" });
@@ -980,8 +1033,10 @@ export const whatsappRouter = createTRPCRouter({
    * Edits a pending schedule: message, groups, time and repeat. The series is
    * re-anchored at the new time and repeat_base_sent records the sends already
    * made, so the cron's occurrence index restarts from here (occurrenceIndex).
-   * repeatTotal counts every send including those already made, so it must be
-   * above repeat_sent. A one-off edit of a part-sent series means one more send.
+   * repeatTotal counts every period including those already made, so at least one
+   * post must remain (minRepeatTotal). A one-off edit of a part-sent series means
+   * one more send. repeatForever has no total; turning it off on a series in
+   * progress needs repeatTotal above the periods already done.
    */
   updateScheduled: publicProcedure
     .input(
@@ -993,6 +1048,8 @@ export const whatsappRouter = createTRPCRouter({
         scheduledAt: z.string().datetime(),
         repeatInterval: z.enum(REPEAT_INTERVALS),
         repeatTotal: z.number().int().min(1).max(REPEAT_MAX),
+        repeatForever: z.boolean().default(false),
+        repeatTimes: repeatTimesSchema,
         /** Also switch it on (used when re-enabling a passed one-off). */
         enable: z.boolean().default(false),
       }),
@@ -1015,10 +1072,13 @@ export const whatsappRouter = createTRPCRouter({
 
       const sent = row.repeat_sent ?? 0;
       const repeating = input.repeatInterval !== "none";
-      if (repeating && input.repeatTotal < minRepeatTotal(sent)) {
+      const forever = repeating && input.repeatForever;
+      const repeatTimes = resolveRepeatTimes(input.repeatInterval, input.scheduledAt, input.repeatTimes);
+      const slots = slotsPerPeriod(repeatTimes);
+      if (repeating && !forever && input.repeatTotal < minRepeatTotal(sent, slots)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: `Number of times must be at least ${minRepeatTotal(sent)} (${sent} already sent)`,
+          message: `Number of times must be at least ${minRepeatTotal(sent, slots)} (${sent} already sent)`,
         });
       }
 
@@ -1033,6 +1093,8 @@ export const whatsappRouter = createTRPCRouter({
           repeat_total: repeating ? input.repeatTotal : sent + 1,
           repeat_anchor_at: input.scheduledAt,
           repeat_base_sent: sent,
+          repeat_forever: forever,
+          repeat_times: repeating ? repeatTimes : null,
           error: null,
           ...(input.enable ? { enabled: true } : {}),
         })
